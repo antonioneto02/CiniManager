@@ -233,6 +233,13 @@ async function notifyAppLogError(appName, source, text) {
   logAlertThrottle.set(signature, Date.now());
 
   rememberRuntimeAlert(appName, 'runtime', text);
+  addErrorHistory({
+    time: now(),
+    app: appName,
+    type: 'runtime',
+    source,
+    detail: trimText(text, 300),
+  });
   const recent = (logBuffers[appName] || []).slice(-6).map(entry => `${entry.source}: ${trimText(entry.text, 180)}`);
   await notifyWhatsApp(`🔴 Erro da aplicação — ${appLabel(appName)}`, [
     `📱 App: ${appName}`,
@@ -250,6 +257,13 @@ async function notifyGitPollError(appName, message) {
   if (Date.now() - lastSent < GIT_ALERT_DUP_WINDOW_MS) return;
   gitAlertThrottle.set(signature, Date.now());
   rememberRuntimeAlert(appName, 'git', message);
+  addErrorHistory({
+    time: now(),
+    app: appName,
+    type: 'git',
+    source: 'polling',
+    detail: trimText(message, 300),
+  });
   await notifyWhatsApp(`⛔ Falha Git/Polling — ${appLabel(appName)}`, [
     `📱 App: ${appName}`,
     `⚠️ Erro: ${trimText(message, 300)}`,
@@ -266,6 +280,13 @@ async function notifyPm2EventError(appName, event) {
   logAlertThrottle.set(signature, Date.now());
 
   rememberRuntimeAlert(appName, 'runtime', `evento PM2: ${event}`);
+  addErrorHistory({
+    time: now(),
+    app: appName,
+    type: 'pm2',
+    source: 'pm2',
+    detail: `evento PM2: ${event}`,
+  });
   await notifyWhatsApp(`🔴 Evento crítico PM2 — ${appLabel(appName)}`, [
     `📱 App: ${appName}`,
     `⚠️ Evento: ${event}`,
@@ -290,6 +311,15 @@ const LOG_MAX      = 300;
 const logBuffers   = {};   
 const sseClients   = {};  
 const historySSE   = [];   
+const errorHistory = [];
+const errorSSE = [];
+
+function addErrorHistory(entry) {
+  errorHistory.unshift(entry);
+  if (errorHistory.length > 120) errorHistory.pop();
+  const data = `data: ${JSON.stringify(errorHistory)}\n\n`;
+  errorSSE.forEach(r => { try { r.write(data); } catch {} });
+}
 
 function pushHistory() {
   const data = `data: ${JSON.stringify(deployHistory)}\n\n`;
@@ -989,6 +1019,13 @@ async function deployApp(appName) {
       `\n⚠️ *Erro:* ${err.message}` +
       (failInfo ? `\n\n📊 *Status:* ${failInfo.status} | Restarts: ${failInfo.restarts}\n💾 Memória: ${failInfo.mem}MB` : '') +
       (errLogs ? `\n\n🔴 *Últimos erros do processo:*\n\`\`\`\n${errLogs}\n\`\`\`` : '');
+    addErrorHistory({
+      time: now(),
+      app: appName,
+      type: 'deploy',
+      source: 'deploy',
+      detail: trimText(err.message, 300),
+    });
     await sendWhatsApp(wppMsg);
     const rec = { time: now(), app: appName, status: 'error', detail: err.message };
     deployHistory.unshift(rec);
@@ -1225,6 +1262,23 @@ app.get('/api/apps', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/apps/:name/error-detail', (req, res) => {
+  const { name } = req.params;
+  const latest = errorHistory.find(item => item.app === name) || null;
+  const recent = errorHistory.filter(item => item.app === name).slice(0, 12);
+  const runtime = getRuntimeAlert(name);
+  const deployErr = deployHistory.find(item => item.app === name && item.status === 'error');
+
+  res.json({
+    app: name,
+    latest,
+    runtimeAlert: runtime,
+    gitError: pollErrors[name] || null,
+    deployError: deployErr ? deployErr.detail : null,
+    recent,
+  });
+});
+
 app.post('/api/apps/:name/:action', async (req, res) => {
   const { name, action } = req.params;
   if (!['start','stop','restart'].includes(action))
@@ -1250,6 +1304,16 @@ app.post('/api/apps/:name/:action', async (req, res) => {
     pushHistory();
     res.status(500).json({ error: e.message });
   }
+});
+
+app.post('/api/apps/:name/ack-errors', (req, res) => {
+  const { name } = req.params;
+  if (!APP_REGISTRY[name]) return res.status(404).json({ error: 'App não encontrado' });
+
+  runtimeAlerts.delete(name);
+  delete pollErrors[name];
+
+  res.json({ ok: true, app: name, cleared: true });
 });
 
 app.post('/api/apps/reset-restarts', async (req, res) => {
@@ -1555,6 +1619,7 @@ app.get('/api/apps/:name/logs', (req, res) => {
 });
 
 app.get('/api/deploy-history', (req, res) => res.json(deployHistory));
+app.get('/api/errors-history', (req, res) => res.json(errorHistory));
 app.get('/api/status', async (req, res) => {
   try {
     const list  = await pm2List();
@@ -1576,6 +1641,20 @@ app.get('/api/deploy-history/stream', (req, res) => {
   req.on('close', () => {
     const i = historySSE.indexOf(res);
     if (i !== -1) historySSE.splice(i, 1);
+  });
+});
+
+app.get('/api/errors-history/stream', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+  res.write(`data: ${JSON.stringify(errorHistory)}\n\n`);
+
+  errorSSE.push(res);
+  req.on('close', () => {
+    const i = errorSSE.indexOf(res);
+    if (i !== -1) errorSSE.splice(i, 1);
   });
 });
 

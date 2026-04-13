@@ -71,11 +71,13 @@ body{background:var(--bg);color:var(--text);font-family:'Cascadia Code','Fira Co
 .lc-hash{font-family:inherit;color:var(--blue);flex-shrink:0}
 .lc-subject{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text)}
 .lc-date{flex-shrink:0;color:var(--muted);font-size:10px}
-.sidebar-title{padding:10px 14px;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);border-bottom:1px solid var(--border)}
+.sidebar-head{padding:8px 10px;border-bottom:1px solid var(--border);display:flex;gap:6px}
+.sidebar-tab{flex:1}
 .sidebar-body{flex:1;overflow-y:auto;padding:8px}
 .h-item{padding:7px 8px;border-radius:4px;margin-bottom:4px;border-left:2px solid transparent}
 .h-ok{border-color:var(--green);background:#0a1a10}
 .h-error{border-color:var(--red);background:#1a0a0a}
+.h-runtime{border-color:#ff7b72;background:#201012}
 .h-app{font-weight:600;font-size:12px}
 .h-detail{color:var(--muted);font-size:10px;margin-top:2px;word-break:break-all}
 .h-time{color:var(--muted);font-size:10px;margin-top:1px}
@@ -182,7 +184,10 @@ body{background:var(--bg);color:var(--text);font-family:'Cascadia Code','Fira Co
       </div>
     </div>
     <div class="sidebar">
-      <div class="sidebar-title">📋 Histórico de Deploys</div>
+      <div class="sidebar-head">
+        <button id="btn-tab-deploy" class="btn btn-sm sidebar-tab btn-blue" onclick="setHistoryMode('deploy')">📋 Deploys</button>
+        <button id="btn-tab-error" class="btn btn-sm sidebar-tab" onclick="setHistoryMode('error')">🔴 Erros</button>
+      </div>
       <div class="sidebar-body" id="history">
         <div class="empty">Nenhum deploy ainda.</div>
       </div>
@@ -266,9 +271,22 @@ body{background:var(--bg);color:var(--text);font-family:'Cascadia Code','Fira Co
   </div>
 </div>
 
+<div class="modal-bg" id="error-modal">
+  <div class="modal" style="width:760px;max-width:95vw">
+    <div class="modal-head">
+      <span class="modal-head-title" id="error-title">🔴 Erro da aplicação</span>
+      <button class="btn btn-sm" onclick="closeErrorModal()">✕</button>
+    </div>
+    <div class="modal-body" id="error-body"><span class="spin"></span> Carregando erro...</div>
+  </div>
+</div>
+
 <script>
 let apps = [], sse = null, sseLogName = null, autoScroll = true, currentGit = null;
 let autoPollRefreshTimer = null;
+let historyMode = 'deploy';
+let deployHistoryItems = [];
+let errorHistoryItems = [];
 const DOCS_APPS = new Set([
   'api-weduu','erp-cini','wf-cini','central-tarefas',
   'hub-cini','cini-pricing','api-sicredi','notificador-pix',
@@ -426,9 +444,12 @@ function renderGrid() {
     const cpuColor = a.cpu>80 ? 'var(--red)' : a.cpu>50 ? 'var(--yellow)' : 'var(--text)';
     const memColor = a.memory>400 ? 'var(--red)' : a.memory>200 ? 'var(--yellow)' : 'var(--text)';
     const alertLabel = a.attentionType === 'git' ? 'Falha Git' : (a.attentionType === 'runtime' ? 'Erro App' : 'Falha Deploy');
+    const dotEl = a.hasAttention
+      ? `<button class="${dotClass(a)}" onclick="openErrorModal('${a.name}')" title="Ver detalhes do erro" style="border:none;cursor:pointer"></button>`
+      : `<span class="${dotClass(a)}"></span>`;
     return `<div class="${cardClass(a)}" data-app="${esc(a.name)}" draggable="true" title="${a.hasAttention ? esc(a.attentionReason || 'Falha de deploy') : ''}">
       <div class="card-header">
-        <span class="${dotClass(a)}"></span>
+        ${dotEl}
         <span class="card-name">${esc(displayName(a.name))}</span>
         <span class="drag-handle" title="Arraste para mover">⋮⋮</span>
         ${a.hasAttention ? `<span class="alert-badge" title="${esc(a.attentionReason || '')}">🔴 ${alertLabel}</span>` : ''}
@@ -1082,7 +1103,7 @@ function closeAutoPoll() {
   stopAutoPollRefresh();
 }
 document.getElementById('autopoll-modal').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeAutoPoll(); });
-function renderHistory(hist) {
+function renderDeployHistory(hist) {
   const el = document.getElementById('history');
   if (!hist.length) { el.innerHTML='<div class="empty">Nenhum deploy ainda.</div>'; return; }
   el.innerHTML = hist.map(h=>`
@@ -1093,11 +1114,87 @@ function renderHistory(hist) {
     </div>`).join('');
 }
 
+function renderErrorHistory(hist) {
+  const el = document.getElementById('history');
+  if (!hist.length) { el.innerHTML='<div class="empty">Nenhum erro recente.</div>'; return; }
+  el.innerHTML = hist.map(h=>`
+    <div class="h-item h-runtime" style="cursor:pointer" onclick="openErrorModal('${esc(h.app)}')">
+      <div class="h-app">[ERRO] ${esc(displayName(h.app))}</div>
+      <div class="h-detail">${esc(h.detail || '')}</div>
+      <div class="h-time">${esc(h.time || '')}${h.source ? ` • ${esc(h.source)}` : ''}</div>
+    </div>`).join('');
+}
+
+function renderHistoryPanel() {
+  if (historyMode === 'error') renderErrorHistory(errorHistoryItems);
+  else renderDeployHistory(deployHistoryItems);
+}
+
+function setHistoryMode(mode) {
+  historyMode = mode === 'error' ? 'error' : 'deploy';
+  const btnDeploy = document.getElementById('btn-tab-deploy');
+  const btnError = document.getElementById('btn-tab-error');
+  btnDeploy.classList.toggle('btn-blue', historyMode === 'deploy');
+  btnError.classList.toggle('btn-blue', historyMode === 'error');
+  renderHistoryPanel();
+}
+
 function startHistorySSE() {
   const es = new EventSource('/api/deploy-history/stream');
-  es.onmessage = e => renderHistory(JSON.parse(e.data));
+  es.onmessage = e => {
+    deployHistoryItems = JSON.parse(e.data);
+    if (historyMode === 'deploy') renderHistoryPanel();
+  };
   es.onerror   = () => setTimeout(startHistorySSE, 5000);
 }
+
+function startErrorHistorySSE() {
+  const es = new EventSource('/api/errors-history/stream');
+  es.onmessage = e => {
+    errorHistoryItems = JSON.parse(e.data);
+    if (historyMode === 'error') renderHistoryPanel();
+  };
+  es.onerror   = () => setTimeout(startErrorHistorySSE, 5000);
+}
+
+async function openErrorModal(name) {
+  document.getElementById('error-title').textContent = `🔴 Erro — ${displayName(name)}`;
+  document.getElementById('error-body').innerHTML = '<span class="spin"></span> Carregando detalhes...';
+  document.getElementById('error-modal').classList.add('open');
+
+  api('POST', `/api/apps/${name}/ack-errors`)
+    .then(() => loadApps())
+    .catch(() => {});
+
+  try {
+    const data = await api('GET', `/api/apps/${name}/error-detail`);
+    const recent = data.recent || [];
+    const latestDetail = data.latest?.detail || data.runtimeAlert?.reason || data.gitError || data.deployError || 'Sem detalhe disponível.';
+    document.getElementById('error-body').innerHTML = `
+      <div class="section">
+        <div class="section-title">Erro atual</div>
+        <div class="h-item h-runtime">
+          <div class="h-app">${esc(displayName(name))}</div>
+          <div class="h-detail">${esc(latestDetail)}</div>
+          <div class="h-time">${esc(data.latest?.time || '')}</div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-title">Últimos erros desta aplicação</div>
+        ${recent.length ? recent.map(item => `
+          <div class="h-item h-runtime" style="margin-bottom:6px">
+            <div class="h-detail">${esc(item.detail || '')}</div>
+            <div class="h-time">${esc(item.time || '')}${item.source ? ` • ${esc(item.source)}` : ''}</div>
+          </div>
+        `).join('') : '<div class="empty" style="padding:8px">Sem erros recentes.</div>'}
+      </div>`;
+  } catch (e) {
+    document.getElementById('error-body').innerHTML = `<span style="color:var(--red)">Erro: ${esc(e.message)}</span>`;
+  }
+}
+
+function closeErrorModal() { document.getElementById('error-modal').classList.remove('open'); }
+document.getElementById('error-modal').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeErrorModal(); });
 
 (function(){
   const handle = document.getElementById('resize-handle');
@@ -1129,6 +1226,8 @@ function startHistorySSE() {
 (async()=>{
   await loadApps();
   startHistorySSE();
+  startErrorHistorySSE();
+  setHistoryMode('deploy');
   setInterval(loadApps, 5000);
   setInterval(()=>{
     document.getElementById('bdg-time').textContent =

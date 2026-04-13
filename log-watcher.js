@@ -234,10 +234,6 @@ function checkResources() {
 
 function getDiskUsage(drive) {
   try {
-    const out = execSync(
-      `powershell -Command "Get-PSDrive ${drive.replace(':', '')} | Select-Object -ExpandProperty Used,Free | ConvertTo-Json"`,
-      { encoding: 'utf8', timeout: 5000 }
-    );
     const wmic = execSync(
       `wmic logicaldisk where "DeviceID='${drive}'" get Size,FreeSpace /format:csv`,
       { encoding: 'utf8', timeout: 5000 }
