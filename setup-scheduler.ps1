@@ -1,4 +1,4 @@
-$SCRIPTS_DIR = "E:\Projetos\monitor"
+$SCRIPTS_DIR = "E:\Projetos\CiniManager"
 $PS_EXE      = "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
 $PS_ARGS_TPL = "-WindowStyle Hidden -NonInteractive -ExecutionPolicy Bypass -File `"{0}`" >> `"{1}`" 2>&1"
 

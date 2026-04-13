@@ -444,15 +444,16 @@ function renderGrid() {
     const cpuColor = a.cpu>80 ? 'var(--red)' : a.cpu>50 ? 'var(--yellow)' : 'var(--text)';
     const memColor = a.memory>400 ? 'var(--red)' : a.memory>200 ? 'var(--yellow)' : 'var(--text)';
     const alertLabel = a.attentionType === 'git' ? 'Falha Git' : (a.attentionType === 'runtime' ? 'Erro App' : 'Falha Deploy');
-    const dotEl = a.hasAttention
-      ? `<button class="${dotClass(a)}" onclick="openErrorModal('${a.name}')" title="Ver detalhes do erro" style="border:none;cursor:pointer"></button>`
-      : `<span class="${dotClass(a)}"></span>`;
+    const dotEl = `<span class="${dotClass(a)}"></span>`;
+    const errorBadge = a.hasAttention
+      ? `<button class="alert-badge" onclick="openErrorModal('${a.name}');event.stopPropagation();" title="Ver detalhes do erro" style="cursor:pointer">🔴 ${alertLabel}</button>`
+      : '';
     return `<div class="${cardClass(a)}" data-app="${esc(a.name)}" draggable="true" title="${a.hasAttention ? esc(a.attentionReason || 'Falha de deploy') : ''}">
       <div class="card-header">
         ${dotEl}
         <span class="card-name">${esc(displayName(a.name))}</span>
         <span class="drag-handle" title="Arraste para mover">⋮⋮</span>
-        ${a.hasAttention ? `<span class="alert-badge" title="${esc(a.attentionReason || '')}">🔴 ${alertLabel}</span>` : ''}
+        ${errorBadge}
         <span class="card-pid">${a.status==='online' ? (a.port ? `:${a.port}` : `pid:${a.pid}`) : a.status}</span>
       </div>
       <div class="metrics">
@@ -1116,11 +1117,22 @@ function renderDeployHistory(hist) {
 
 function renderErrorHistory(hist) {
   const el = document.getElementById('history');
-  if (!hist.length) { el.innerHTML='<div class="empty">Nenhum erro recente.</div>'; return; }
-  el.innerHTML = hist.map(h=>`
-    <div class="h-item h-runtime" style="cursor:pointer" onclick="openErrorModal('${esc(h.app)}')">
+  const active = apps.filter(a => a.hasAttention).map(a => ({
+    id: `active:${a.name}`,
+    app: a.name,
+    source: a.attentionType || 'runtime',
+    time: 'agora',
+    preview: a.attentionReason || 'Erro ativo',
+    detail: a.attentionReason || 'Erro ativo',
+    _active: true,
+  }));
+  const merged = [...active, ...(hist || [])];
+
+  if (!merged.length) { el.innerHTML='<div class="empty">Nenhum erro recente.</div>'; return; }
+  el.innerHTML = merged.map(h=>`
+    <div class="h-item h-runtime" style="cursor:pointer" onclick="${h._active ? `openErrorModal('${esc(h.app)}')` : `openErrorHistoryItem(${Number(h.id)})`}">
       <div class="h-app">[ERRO] ${esc(displayName(h.app))}</div>
-      <div class="h-detail">${esc(h.detail || '')}</div>
+      <div class="h-detail">${esc(h.preview || h.detail || '')}</div>
       <div class="h-time">${esc(h.time || '')}${h.source ? ` • ${esc(h.source)}` : ''}</div>
     </div>`).join('');
 }
@@ -1187,6 +1199,28 @@ async function openErrorModal(name) {
             <div class="h-time">${esc(item.time || '')}${item.source ? ` • ${esc(item.source)}` : ''}</div>
           </div>
         `).join('') : '<div class="empty" style="padding:8px">Sem erros recentes.</div>'}
+      </div>`;
+  } catch (e) {
+    document.getElementById('error-body').innerHTML = `<span style="color:var(--red)">Erro: ${esc(e.message)}</span>`;
+  }
+}
+
+async function openErrorHistoryItem(id) {
+  document.getElementById('error-title').textContent = '🔴 Erro completo';
+  document.getElementById('error-body').innerHTML = '<span class="spin"></span> Carregando detalhes...';
+  document.getElementById('error-modal').classList.add('open');
+  try {
+    const data = await api('GET', `/api/errors-history/${id}`);
+    document.getElementById('error-body').innerHTML = `
+      <div class="section">
+        <div class="section-title">Aplicação</div>
+        <div class="info-row"><span class="info-lbl">App</span><span class="info-val">${esc(displayName(data.app))}</span></div>
+        <div class="info-row"><span class="info-lbl">Quando</span><span class="info-val">${esc(data.time || '')}</span></div>
+        <div class="info-row"><span class="info-lbl">Origem</span><span class="info-val">${esc(data.source || '')}</span></div>
+      </div>
+      <div class="section">
+        <div class="section-title">Erro Completo</div>
+        <pre style="white-space:pre-wrap;word-break:break-word;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px;font-size:12px;line-height:1.6">${esc(data.detail || '')}</pre>
       </div>`;
   } catch (e) {
     document.getElementById('error-body').innerHTML = `<span style="color:var(--red)">Erro: ${esc(e.message)}</span>`;

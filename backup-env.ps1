@@ -1,4 +1,4 @@
-$BACKUP_ROOT = "E:\Projetos\monitor\backups"
+$BACKUP_ROOT = "E:\Projetos\CiniManager\backups"
 $DATE_FOLDER = Get-Date -Format "yyyy-MM-dd"
 $DEST        = Join-Path $BACKUP_ROOT $DATE_FOLDER
 $KEEP_DAYS   = 30  

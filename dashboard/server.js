@@ -22,7 +22,7 @@ const APP_REGISTRY = {
   'cini-pricing':    'E:/Projetos/Cini-Pricing',
   'api-sicredi':     'E:/Projetos/API_Sicredi',
   'notificador-pix': 'C:/Projetos/Confirmacao_Pix/NotificadorPIX',
-  'log-watcher':     'E:/Projetos/monitor',
+  'log-watcher':     'E:/Projetos/CiniManager',
   'cini-dashboard':  'E:/Projetos/CiniManager/dashboard',
   'whatsapp-bot':         'E:/Projetos/Central-Notificacoes/whatsapp-bot',
   'webhook-whatsapp':     'C:/Projetos/WebhookWhatsAppNode',
@@ -238,7 +238,7 @@ async function notifyAppLogError(appName, source, text) {
     app: appName,
     type: 'runtime',
     source,
-    detail: trimText(text, 300),
+    detail: text,
   });
   const recent = (logBuffers[appName] || []).slice(-6).map(entry => `${entry.source}: ${trimText(entry.text, 180)}`);
   await notifyWhatsApp(`🔴 Erro da aplicação — ${appLabel(appName)}`, [
@@ -262,7 +262,7 @@ async function notifyGitPollError(appName, message) {
     app: appName,
     type: 'git',
     source: 'polling',
-    detail: trimText(message, 300),
+    detail: message,
   });
   await notifyWhatsApp(`⛔ Falha Git/Polling — ${appLabel(appName)}`, [
     `📱 App: ${appName}`,
@@ -313,9 +313,20 @@ const sseClients   = {};
 const historySSE   = [];   
 const errorHistory = [];
 const errorSSE = [];
+let errorSeq = 0;
 
 function addErrorHistory(entry) {
-  errorHistory.unshift(entry);
+  const fullDetail = String(entry?.detail || '').trim();
+  const rec = {
+    id: ++errorSeq,
+    time: entry?.time || now(),
+    app: entry?.app || 'desconhecido',
+    type: entry?.type || 'runtime',
+    source: entry?.source || '',
+    detail: fullDetail,
+    preview: trimText(fullDetail, 170),
+  };
+  errorHistory.unshift(rec);
   if (errorHistory.length > 120) errorHistory.pop();
   const data = `data: ${JSON.stringify(errorHistory)}\n\n`;
   errorSSE.forEach(r => { try { r.write(data); } catch {} });
@@ -1024,7 +1035,7 @@ async function deployApp(appName) {
       app: appName,
       type: 'deploy',
       source: 'deploy',
-      detail: trimText(err.message, 300),
+      detail: err.message,
     });
     await sendWhatsApp(wppMsg);
     const rec = { time: now(), app: appName, status: 'error', detail: err.message };
@@ -1620,6 +1631,13 @@ app.get('/api/apps/:name/logs', (req, res) => {
 
 app.get('/api/deploy-history', (req, res) => res.json(deployHistory));
 app.get('/api/errors-history', (req, res) => res.json(errorHistory));
+app.get('/api/errors-history/:id', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'ID inválido' });
+  const item = errorHistory.find(x => x.id === id);
+  if (!item) return res.status(404).json({ error: 'Erro não encontrado' });
+  res.json(item);
+});
 app.get('/api/status', async (req, res) => {
   try {
     const list  = await pm2List();
