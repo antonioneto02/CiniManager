@@ -263,7 +263,8 @@ function getDocsUrl(app) {
 }
 
 const DISPLAY_NAMES = {
-  'erp-cini': 'Gestão Portaria',
+  'erp-cini':        'Gestão Portaria',
+  'cini-dashboard':  'Cini Manager',
 };
 function displayName(name) { return DISPLAY_NAMES[name] || name; }
 const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');

@@ -69,7 +69,7 @@ module.exports = {
     {
       name: 'gerenciador-cargas',
       script: 'C:/Projetos/gerenciador-cargas/venv/Scripts/python.exe',
-      args: '-u manage.py runserver 0.0.0.0:8502',
+      args: '-u manage.py runserver 0.0.0.0:8502 --noreload',
       cwd: 'C:/Projetos/gerenciador-cargas',
       exec_mode: 'fork',
       autorestart: true,

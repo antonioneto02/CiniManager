@@ -23,7 +23,7 @@ const APP_REGISTRY = {
   'api-sicredi':     'E:/Projetos/API_Sicredi',
   'notificador-pix': 'C:/Projetos/Confirmacao_Pix/NotificadorPIX',
   'log-watcher':     'E:/Projetos/monitor',
-  'cini-dashboard':  'E:/Projetos/monitor/dashboard',
+  'cini-dashboard':  'E:/Projetos/CiniManager/dashboard',
   'whatsapp-bot':         'E:/Projetos/Central-Notificacoes/whatsapp-bot',
   'webhook-whatsapp':     'C:/Projetos/WebhookWhatsAppNode',
   'client-baixas-pix':    'C:/Projetos/ClientBaixasPIX',
@@ -35,7 +35,8 @@ const APP_REGISTRY = {
   'central-notificacoes': 'E:/Projetos/Central-Notificacoes/CentralNotificacoes',
 };
 
-const DEPLOY_EXCLUDE = new Set(['log-watcher', 'cini-dashboard']);
+const DEPLOY_EXCLUDE    = new Set(['log-watcher']);
+const STAGED_DEPLOY_APPS = new Set(['cini-dashboard']); 
 const AUTOPOLL_FILE = path.join(__dirname, '.autopoll.json');
 function loadAutoPoll() {
   try {
@@ -154,6 +155,23 @@ function pm2Do(action, target) {
   }));
 }
 
+async function pm2Reload(appName, log, retries = 5, delayMs = 2000) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      await pm2Do('reload', appName);
+      return;
+    } catch (err) {
+      const msg = (err.message || err.msg || String(err)).toLowerCase();
+      if (msg.includes('reload in progress') && i < retries - 1) {
+        log('deploy', `⏳ PM2 reload em andamento, aguardando ${delayMs / 1000}s... (tentativa ${i + 1}/${retries})`);
+        await new Promise(r => setTimeout(r, delayMs));
+      } else {
+        throw err;
+      }
+    }
+  }
+}
+
 function pm2List() {
   return ensurePm2().then(() => new Promise((resolve, reject) => {
     pm2.list((err, list) => {
@@ -233,7 +251,6 @@ async function getAppLogFiles(appName) {
   return files;
 }
 
-/* Coleta info do processo PM2 para mensagens detalhadas */
 async function pm2Info(name) {
   try {
     const list = await pm2List();
@@ -252,13 +269,11 @@ async function pm2Info(name) {
   } catch { return null; }
 }
 
-/* Lê últimas linhas do log de erro do PM2 */
 function readPm2ErrorLog(name, lines = 8) {
   try {
     const pm2Home = process.env.PM2_HOME || path.join(process.env.USERPROFILE || 'C:/Users/nerias.sousa', '.pm2');
     let errFile = path.join(pm2Home, 'logs', `${name}-error.log`);
     if (!fs.existsSync(errFile)) {
-      /* Tenta com id no nome */
       const dir = path.join(pm2Home, 'logs');
       const files = fs.readdirSync(dir).filter(f => f.startsWith(name + '-error'));
       if (!files.length) return '';
@@ -289,6 +304,79 @@ async function waitOnline(name, maxMs = 25000) {
     } catch {}
   }
   return false;
+}
+
+async function httpSmoke(appName, maxMs = 15000) {
+  const port = readAppPort(appName);
+  if (!port) return true; 
+  const http = require('http');
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 2000));
+    const ok = await new Promise(resolve => {
+      const req = http.get({ host: 'localhost', port, path: '/', timeout: 4000 }, res => {
+        resolve(res.statusCode < 500);
+      });
+      req.on('error', () => resolve(false));
+      req.on('timeout', () => { req.destroy(); resolve(false); });
+    });
+    if (ok) return true;
+  }
+  return false;
+}
+
+async function stagedTest(appName, cwdWin, log) {
+  const { spawn } = require('child_process');
+  const http = require('http');
+  const prodPort = KNOWN_PORTS[appName] || 9999;
+  const testPort = prodPort + 1;
+  const scriptFile = path.join(cwdWin, 'server.js');
+  if (!fs.existsSync(scriptFile)) {
+    log('deploy', '⚠️  stagedTest: server.js não encontrado, pulando teste em porta temporária');
+    return true;
+  }
+
+  log('deploy', `🔬 Iniciando instância de teste na porta ${testPort}...`);
+  const child = spawn(process.execPath, [scriptFile], {
+    cwd:   cwdWin,
+    env:   { ...process.env, DASHBOARD_PORT: String(testPort) },
+    stdio: 'pipe',
+    detached: false,
+  });
+
+  let errOutput = '';
+  child.stderr?.on('data', d => { errOutput += d.toString().slice(-500); });
+  child.stdout?.on('data', () => {});
+
+  let testOk = false;
+  try {
+    const deadline = Date.now() + 25000;
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 2000));
+      if (child.exitCode !== null) {
+        log('deploy', `❌ Instância de teste encerrou prematuramente (exit ${child.exitCode})`);
+        if (errOutput) log('deploy', errOutput.trim().split('\n').slice(-3).join(' | '));
+        break;
+      }
+      const ok = await new Promise(resolve => {
+        const req = http.get({ host: 'localhost', port: testPort, path: '/', timeout: 4000 }, res => {
+          resolve(res.statusCode < 500);
+        });
+        req.on('error',   () => resolve(false));
+        req.on('timeout', () => { req.destroy(); resolve(false); });
+      });
+      if (ok) { testOk = true; break; }
+    }
+    if (testOk) {
+      log('deploy', `✅ Instância de teste OK na porta ${testPort}`);
+    } else {
+      log('deploy', `❌ Instância de teste não respondeu na porta ${testPort}`);
+      if (errOutput) log('deploy', errOutput.trim().split('\n').slice(-3).join(' | '));
+    }
+    return testOk;
+  } finally {
+    try { child.kill('SIGTERM'); } catch {}
+  }
 }
 
 const GIT_ENV = {
@@ -328,6 +416,15 @@ function findGitRoot(appCwd) {
   return null;
 }
 
+function getPathFilter(appCwd, gitRoot) {
+  const normApp  = appCwd.replace(/\\/g, '/').replace(/\/$/, '');
+  const normRoot = gitRoot.replace(/\\/g, '/').replace(/\/$/, '');
+  if (normApp !== normRoot && normApp.startsWith(normRoot + '/')) {
+    return normApp.slice(normRoot.length + 1);
+  }
+  return null;
+}
+
 async function fixRemoteUrls() {
   const results = [];
   const seen = new Set();
@@ -360,18 +457,20 @@ function gitInfo(appName) {
   if (!cwd || !gitRoot) {
     return { hasGit: false };
   }
-  git('fetch --quiet', gitRoot); 
+  const pathFilter = getPathFilter(cwd, gitRoot);
+  const pathSuffix = pathFilter ? ` -- ${pathFilter}` : '';
+  git('fetch --quiet', gitRoot);
   const branch  = git('rev-parse --abbrev-ref HEAD', gitRoot) || 'main';
-  const current = git('log -1 --format=%h|||%s|||%ar|||%an', gitRoot);
+  const current = git(`log -1 --format=%h|||%s|||%ar|||%an${pathSuffix}`, gitRoot);
   const [hash = '', subject = '', date = '', author = ''] = (current || '').split('|||');
-  const pendingRaw = git(`log HEAD..origin/${branch} --format=%h|||%s|||%ar|||%an`, gitRoot);
+  const pendingRaw = git(`log HEAD..origin/${branch} --format=%h|||%s|||%ar|||%an${pathSuffix}`, gitRoot);
   const pending = pendingRaw
     ? pendingRaw.split('\n').filter(Boolean).map(l => {
         const [h, s, d, a] = l.split('|||');
         return { hash: h, subject: s, date: d, author: a };
       })
     : [];
-  const recentRaw = git('log -10 --format=%h|||%s|||%ar|||%an', gitRoot);
+  const recentRaw = git(`log -10 --format=%h|||%s|||%ar|||%an${pathSuffix}`, gitRoot);
   const recent = recentRaw
     ? recentRaw.split('\n').filter(Boolean).map(l => {
         const [h, s, d, a] = l.split('|||');
@@ -383,8 +482,22 @@ function gitInfo(appName) {
 
 const deployLock    = new Set();
 const deployHistory = [];
+const DEPLOY_LOCK_FILE = path.join(__dirname, '.deploy.lock');
 
-// Cache last commit per app — TTL 60 s (git log is local/fast but called every 5 s)
+function acquireFileLock(appName) {
+  try {
+    if (fs.existsSync(DEPLOY_LOCK_FILE)) {
+      const existing = JSON.parse(fs.readFileSync(DEPLOY_LOCK_FILE, 'utf8'));
+      if (Date.now() - existing.ts < 5 * 60 * 1000) return false;
+    }
+    fs.writeFileSync(DEPLOY_LOCK_FILE, JSON.stringify({ appName, ts: Date.now(), pid: process.pid }), 'utf8');
+    return true;
+  } catch { return false; }
+}
+
+function releaseFileLock() {
+  try { fs.unlinkSync(DEPLOY_LOCK_FILE); } catch {}
+}
 const lastCommitCache = new Map();
 
 async function getLastCommit(appName) {
@@ -394,7 +507,9 @@ async function getLastCommit(appName) {
   if (!cwd) return null;
   const gitRoot = findGitRoot(cwd);
   if (!gitRoot) return null;
-  const raw = await gitAsync('log -1 --format=%h|||%s|||%ar', gitRoot);
+  const pathFilter = getPathFilter(cwd, gitRoot);
+  const pathSuffix = pathFilter ? ` -- ${pathFilter}` : '';
+  const raw = await gitAsync(`log -1 --format=%h|||%s|||%ar${pathSuffix}`, gitRoot);
   if (!raw) return null;
   const [hash, subject, date] = raw.split('|||');
   const data = { hash: hash?.trim(), subject: subject?.trim(), date: date?.trim() };
@@ -436,6 +551,7 @@ function installDeps(cwd, cwdWin, log) {
 
 async function deployApp(appName) {
   if (deployLock.has(appName)) throw new Error('Deploy já em andamento');
+  if (STAGED_DEPLOY_APPS.has(appName) && !acquireFileLock(appName)) throw new Error('Deploy já em andamento (outra instância)');
   deployLock.add(appName);
 
   const cwd    = APP_REGISTRY[appName];
@@ -462,31 +578,61 @@ async function deployApp(appName) {
         }
 
         installDeps(cwd, cwdWin, log);
-        log('deploy', '🧪 Testando alterações (restart + verificação)...');
-        await pm2Do('restart', appName);
-        log('deploy', 'Aguardando processo online...');
-        const online = await waitOnline(appName);
-        if (!online) throw new Error('❌ Teste falhou — app não ficou online. Alterações NÃO foram commitadas.');
-        log('deploy', '✅ Teste OK — app rodando corretamente');
-        if (localChanges.length > 0) {
-          log('deploy', 'git add .');
-          const addOut = git('add .', gitRoot);
-          if (addOut === null) throw new Error('git add falhou');
-
-          const commitMsg = `deploy(${appName}): alterações do servidor — ${now()}`;
-          log('deploy', `git commit -m "${commitMsg}"...`);
+        if (STAGED_DEPLOY_APPS.has(appName)) {
+          log('deploy', '🧪 Testando em instância temporária antes de subir produção...');
+          const staged = await stagedTest(appName, cwdWin, log);
+          if (!staged) throw new Error('❌ Teste em porta temporária falhou. Alterações NÃO foram commitadas nem publicadas.');
+          log('deploy', '✅ Teste OK — commitando antes de reiniciar...');
+          if (localChanges.length > 0) {
+            log('deploy', 'git add .');
+            const addOut = git('add .', gitRoot);
+            if (addOut === null) throw new Error('git add falhou');
+            const commitMsg = `deploy(${appName}): alterações do servidor — ${now()}`;
+            log('deploy', `git commit -m "${commitMsg}"...`);
+            try {
+              execSync(`git -c user.name="CINI Manager" -c user.email="deploy@cini.com.br" commit -m "${commitMsg}"`,
+                { cwd: gitRoot, encoding: 'utf8', timeout: 15000 });
+            } catch (e) { throw new Error('git commit falhou: ' + e.message.split('\n')[0]); }
+            log('deploy', 'Commit criado');
+          }
+          log('deploy', 'git push...');
           try {
-            execSync(`git -c user.name="CINI Manager" -c user.email="deploy@cini.com.br" commit -m "${commitMsg}"`,
-              { cwd: gitRoot, encoding: 'utf8', timeout: 15000 });
-          } catch (e) { throw new Error('git commit falhou: ' + e.message.split('\n')[0]); }
-          log('deploy', 'Commit criado');
+            execSync('git push', { cwd: gitRoot, encoding: 'utf8', timeout: 30000 });
+          } catch (e) { throw new Error('git push falhou: ' + e.message.split('\n')[0]); }
+          log('deploy', 'Push OK');
+          log('deploy', '🔄 Agendando restart via processo filho (pm2 restart)...');
+          const pm2Path = require.resolve('pm2');
+          const restartCode = `const pm2=require(${JSON.stringify(pm2Path)});setTimeout(()=>{pm2.connect(e=>{if(!e)pm2.restart(${JSON.stringify(appName)},()=>pm2.disconnect());});},1500);`;
+          const { spawn: spawnRestart } = require('child_process');
+          spawnRestart(process.execPath, ['-e', restartCode], { detached: true, stdio: 'ignore', cwd: __dirname }).unref();
+        } else {
+          log('deploy', '🧪 Testando alterações (restart + verificação)...');
+          await pm2Do('restart', appName);
+          log('deploy', 'Aguardando processo online...');
+          const online = await waitOnline(appName);
+          if (!online) throw new Error('❌ Teste falhou — app não ficou online. Alterações NÃO foram commitadas.');
+          log('deploy', '🌐 Verificando resposta HTTP...');
+          const httpOk = await httpSmoke(appName);
+          if (!httpOk) throw new Error('❌ Smoke test falhou — app está online no PM2 mas não responde via HTTP. Alterações NÃO foram commitadas.');
+          log('deploy', '✅ Teste OK — app rodando e respondendo corretamente');
+          if (localChanges.length > 0) {
+            log('deploy', 'git add .');
+            const addOut = git('add .', gitRoot);
+            if (addOut === null) throw new Error('git add falhou');
+            const commitMsg = `deploy(${appName}): alterações do servidor — ${now()}`;
+            log('deploy', `git commit -m "${commitMsg}"...`);
+            try {
+              execSync(`git -c user.name="CINI Manager" -c user.email="deploy@cini.com.br" commit -m "${commitMsg}"`,
+                { cwd: gitRoot, encoding: 'utf8', timeout: 15000 });
+            } catch (e) { throw new Error('git commit falhou: ' + e.message.split('\n')[0]); }
+            log('deploy', 'Commit criado');
+          }
+          log('deploy', 'git push...');
+          try {
+            execSync('git push', { cwd: gitRoot, encoding: 'utf8', timeout: 30000 });
+          } catch (e) { throw new Error('git push falhou: ' + e.message.split('\n')[0]); }
+          log('deploy', 'Push OK');
         }
-
-        log('deploy', 'git push...');
-        try {
-          execSync('git push', { cwd: gitRoot, encoding: 'utf8', timeout: 30000 });
-        } catch (e) { throw new Error('git push falhou: ' + e.message.split('\n')[0]); }
-        log('deploy', 'Push OK');
 
         const commitAfter = git('rev-parse --short HEAD', gitRoot);
         const branch = git('rev-parse --abbrev-ref HEAD', gitRoot) || 'main';
@@ -519,12 +665,34 @@ async function deployApp(appName) {
         const changed = commitBefore && commitAfter && commitBefore !== commitAfter;
 
         installDeps(cwd, cwdWin, log);
-        log('deploy', '🧪 Testando código atualizado (restart + verificação)...');
-        await pm2Do('restart', appName);
-        log('deploy', 'Aguardando processo online...');
-        const online = await waitOnline(appName);
+        let testPassed;
+        if (STAGED_DEPLOY_APPS.has(appName)) {
+          log('deploy', '🧪 Testando em instância temporária antes de subir produção...');
+          const staged = await stagedTest(appName, cwdWin, log);
+          if (staged) {
+            log('deploy', '🚀 Teste OK — promovendo para produção (pm2 reload)...');
+            await pm2Reload(appName, log);
+            const online = await waitOnline(appName);
+            testPassed = online;
+            if (!online) log('deploy', '❌ pm2 reload falhou — produção não ficou online.');
+          } else {
+            testPassed = false;
+          }
+        } else {
+          log('deploy', '🧪 Testando código atualizado (restart + verificação)...');
+          await pm2Do('restart', appName);
+          log('deploy', 'Aguardando processo online...');
+          const online = await waitOnline(appName);
+          const httpOkRemote = online ? await (async () => {
+            log('deploy', '🌐 Verificando resposta HTTP...');
+            const ok = await httpSmoke(appName);
+            if (ok) log('deploy', '✅ HTTP OK');
+            return ok;
+          })() : false;
+          testPassed = online && httpOkRemote;
+        }
 
-        if (!online && changed) {
+        if (!testPassed && changed) {
           log('deploy', `❌ Teste falhou — fazendo rollback para ${commitBefore}...`);
           git(`reset --hard ${commitBefore}`, gitRoot);
           installDeps(cwd, cwdWin, log);
@@ -553,9 +721,9 @@ async function deployApp(appName) {
           pushHistory();
           throw new Error(`Teste falhou — código do remoto não rodou. Rollback para ${commitBefore}`);
         }
-        if (!online) throw new Error('App não ficou online após 25s');
+        if (!testPassed) throw new Error(online ? 'Smoke test HTTP falhou — app não responde corretamente' : 'App não ficou online após 25s');
 
-        log('deploy', `✅ Teste OK — app rodando corretamente`);
+        log('deploy', `✅ Teste OK — app rodando e respondendo corretamente`);
         log('deploy', `━━━ DEPLOY OK ${changed ? `(${commitBefore} → ${commitAfter})` : '(sem mudanças)'} ━━━`);
 
         const info = await pm2Info(appName);
@@ -623,6 +791,7 @@ async function deployApp(appName) {
     throw err;
   } finally {
     deployLock.delete(appName);
+    if (STAGED_DEPLOY_APPS.has(appName)) releaseFileLock();
   }
 }
 
@@ -774,6 +943,7 @@ const KNOWN_PORTS = {
   'portal-streamlit':     8501,
   'gerenciador-cargas':   8502,
   'central-notificacoes': 5000,
+  'cini-dashboard':       9999,
 };
 
 function readAppPort(appName) {
@@ -808,7 +978,7 @@ function readAppPort(appName) {
 app.get('/api/apps', async (req, res) => {
   try {
     const list = await pm2List();
-    const HIDE = new Set(['log-watcher', 'cini-dashboard']);
+    const HIDE = new Set(['log-watcher']);
     const filtered = list.filter(p => !p.name.startsWith('pm2-') && !HIDE.has(p.name));
     const commits = await Promise.all(filtered.map(p => getLastCommit(p.name).catch(() => null)));
     const data = filtered.map((p, i) => ({
@@ -931,9 +1101,7 @@ app.get('/api/apps/:name/commit-diff', async (req, res) => {
   const gitRoot = findGitRoot(cwd);
   if (!gitRoot) return res.status(400).json({ error: 'Sem repositório git' });
   const ref = hash || 'HEAD';
-  // stat: files changed summary
   const stat = await gitAsync(`show --stat --format= ${ref}`, gitRoot);
-  // diff: unified diff (-U3 context lines), limit to ~4000 lines to avoid huge payloads
   const rawDiff = await gitAsync(`show --format= ${ref}`, gitRoot);
   if (rawDiff === null) return res.status(500).json({ error: 'git show falhou' });
   const lines = rawDiff.split('\n').slice(0, 4000);
@@ -1024,7 +1192,6 @@ async function startFileTail(appName) {
       fileTailState[fp].watcher = fs.watch(fp, { persistent: false }, () => consumeFileTail(fp));
     }
     if (!fileTailState[fp].poller) {
-      // Fallback para Windows quando fs.watch não dispara em append contínuo.
       fileTailState[fp].poller = setInterval(() => consumeFileTail(fp), 1500);
     }
   }
