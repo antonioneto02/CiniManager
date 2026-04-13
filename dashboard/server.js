@@ -23,6 +23,7 @@ const ALLOWED_USER_BY_ID = {
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+app.use('/css', express.static(path.join(__dirname, 'public', 'css')));
 app.use(session({
   secret: SESSION_SECRET,
   resave: false,
@@ -285,6 +286,21 @@ const CARD_ORDER_FILE = path.join(__dirname, '.card-order.json');
 const DISPLAY_NAMES = {
   'erp-cini': 'Gestão Portaria',
   'cini-dashboard': 'Cini Manager',
+  'client-baixas-pix': 'Baixas PIX',
+  'central-notificacoes': 'Central Notificações',
+  'wf-cini': 'Workflow Cini',
+  'api-weduu': 'API Weduu',
+  'central-tarefas': 'Central de Tarefas',
+  'hub-cini': 'HUB Cini',
+  'cini-pricing': 'Pricing Cini',
+  'api-sicredi': 'API Sicredi',
+  'notificador-pix': 'Notificações PIX',
+  'whatsapp-bot': 'BOT WhatsApp',
+  'portal-consultas': 'Portal de Consultas',
+  'portal-streamlit': 'Portal Stremalit',
+  'gerenciador-cargas': 'Portal de Cargas',
+  'whatsapp-motoristas': 'Tracking',
+  'whatsapp-webnode': 'Cini Notifica e WB Sicredi',
 };
 
 function appLabel(name) {
@@ -435,6 +451,50 @@ async function createServiceGroup(name, apps) {
 
     await tx.commit();
     return { id: groupId, name: cleanName, apps: selectedApps };
+  } catch (err) {
+    try { await tx.rollback(); } catch {}
+    throw err;
+  }
+}
+
+async function deleteServiceGroup(groupId) {
+  const id = Number(groupId);
+  if (!Number.isFinite(id) || id <= 0) throw new Error('Grupo inválido');
+
+  const p = await getGroupsPool();
+  const tx = new sql.Transaction(p);
+  await tx.begin();
+  try {
+    const checkReq = new sql.Request(tx);
+    checkReq.input('idGrupo', sql.Int, id);
+    const check = await checkReq.query(`
+      SELECT TOP 1 ID_GRUPO, NOME_GRUPO
+      FROM dbo.CINI_MANAGER_GRUPOS
+      WHERE ID_GRUPO = @idGrupo
+        AND ATIVO = 1
+    `);
+    if (!(check.recordset || []).length) {
+      throw new Error('Grupo não encontrado');
+    }
+    const groupName = String(check.recordset[0].NOME_GRUPO || '').trim();
+
+    const delAppsReq = new sql.Request(tx);
+    delAppsReq.input('idGrupo', sql.Int, id);
+    await delAppsReq.query(`
+      DELETE FROM dbo.CINI_MANAGER_GRUPOS_APPS
+      WHERE ID_GRUPO = @idGrupo
+    `);
+
+    const delGroupReq = new sql.Request(tx);
+    delGroupReq.input('idGrupo', sql.Int, id);
+    await delGroupReq.query(`
+      UPDATE dbo.CINI_MANAGER_GRUPOS
+      SET ATIVO = 0
+      WHERE ID_GRUPO = @idGrupo
+    `);
+
+    await tx.commit();
+    return { id, name: groupName };
   } catch (err) {
     try { await tx.rollback(); } catch {}
     throw err;
@@ -659,12 +719,33 @@ function now() {
 }
 
 const LOG_MAX      = 300;
-const logBuffers   = {};   
-const sseClients   = {};  
-const historySSE   = [];   
+const logBuffers   = {};
+const sseClients   = {};
+const historySSE   = [];
 const errorHistory = [];
 const errorSSE = [];
 let errorSeq = 0;
+
+function pushHistory() {
+  const data = `data: ${JSON.stringify(deployHistory)}\n\n`;
+  historySSE.forEach(r => { try { r.write(data); } catch {} });
+}
+
+function addDeployHistory(rec) {
+  deployHistory.unshift(rec);
+  if (deployHistory.length > 100) deployHistory.pop();
+  pushHistory();
+  getPool().then(pool => {
+    const req = pool.request();
+    req.input('aplicacao', sql.NVarChar(100),      String(rec.app    || ''));
+    req.input('status',    sql.NVarChar(20),        String(rec.status || 'ok'));
+    req.input('detalhe',   sql.NVarChar(sql.MAX),   String(rec.detail || ''));
+    return req.query(`
+      INSERT INTO dbo.CINI_MANAGER_DEPLOY_HISTORICO (APLICACAO, STATUS, DETALHE)
+      VALUES (@aplicacao, @status, @detalhe)
+    `);
+  }).catch(e => console.error('[db] deploy insert:', e.message));
+}
 
 function addErrorHistory(entry) {
   const fullDetail = String(entry?.detail || '').trim();
@@ -676,16 +757,97 @@ function addErrorHistory(entry) {
     source: entry?.source || '',
     detail: fullDetail,
     preview: trimText(fullDetail, 170),
+    seen: false,
   };
   errorHistory.unshift(rec);
-  if (errorHistory.length > 120) errorHistory.pop();
+  if (errorHistory.length > 200) errorHistory.pop();
   const data = `data: ${JSON.stringify(errorHistory)}\n\n`;
   errorSSE.forEach(r => { try { r.write(data); } catch {} });
+  getPool().then(pool => {
+    const req = pool.request();
+    req.input('aplicacao', sql.NVarChar(100),    rec.app);
+    req.input('tipo',      sql.NVarChar(30),     rec.type);
+    req.input('origem',    sql.NVarChar(50),     rec.source || '');
+    req.input('detalhe',   sql.NVarChar(sql.MAX), rec.detail);
+    req.input('resumo',    sql.NVarChar(300),    rec.preview);
+    return req.query(`
+      INSERT INTO dbo.CINI_MANAGER_ERRO_HISTORICO (APLICACAO, TIPO, ORIGEM, DETALHE, RESUMO)
+      VALUES (@aplicacao, @tipo, @origem, @detalhe, @resumo)
+    `);
+  }).catch(e => console.error('[db] erro insert:', e.message));
 }
 
-function pushHistory() {
-  const data = `data: ${JSON.stringify(deployHistory)}\n\n`;
-  historySSE.forEach(r => { try { r.write(data); } catch {} });
+async function ackErrorsInDB(appName) {
+  try {
+    const pool = await getPool();
+    const req = pool.request();
+    req.input('aplicacao', sql.NVarChar(100), appName);
+    await req.query(`
+      UPDATE dbo.CINI_MANAGER_ERRO_HISTORICO
+      SET    DTVISTO = GETDATE()
+      WHERE  APLICACAO = @aplicacao
+        AND  DTVISTO IS NULL
+    `);
+  } catch (e) {
+    console.error('[db] ack errors:', e.message);
+  }
+}
+
+async function loadHistoriesFromDB() {
+  try {
+    const pool = await getPool();
+
+    const dRes = await pool.request().query(`
+      SELECT TOP 100
+        APLICACAO, STATUS, DETALHE,
+        FORMAT(DTINC, 'dd/MM/yyyy HH:mm:ss') AS TEMPO
+      FROM dbo.CINI_MANAGER_DEPLOY_HISTORICO
+      ORDER BY ID_DEPLOY DESC
+    `);
+    deployHistory.length = 0;
+    for (const r of dRes.recordset) {
+      deployHistory.push({ time: r.TEMPO, app: r.APLICACAO, status: r.STATUS, detail: r.DETALHE || '' });
+    }
+
+    const eRes = await pool.request().query(`
+      SELECT TOP 200
+        ID_ERRO, APLICACAO, TIPO, ORIGEM, DETALHE, RESUMO, DTVISTO,
+        FORMAT(DTINC, 'dd/MM/yyyy HH:mm:ss') AS TEMPO
+      FROM dbo.CINI_MANAGER_ERRO_HISTORICO
+      ORDER BY ID_ERRO DESC
+    `);
+    errorHistory.length = 0;
+    errorSeq = 0;
+    for (const r of eRes.recordset) {
+      errorHistory.push({
+        id:      ++errorSeq,
+        time:    r.TEMPO,
+        app:     r.APLICACAO,
+        type:    r.TIPO   || 'runtime',
+        source:  r.ORIGEM || '',
+        detail:  r.DETALHE || '',
+        preview: r.RESUMO  || trimText(r.DETALHE || '', 170),
+        seen:    !!r.DTVISTO,
+      });
+    }
+
+    // Restaurar acknowledgedAlertAt a partir da ultima confirmacao por app
+    const ackRes = await pool.request().query(`
+      SELECT APLICACAO, MAX(DTVISTO) AS ULTIMA_CONFIRMACAO
+      FROM   dbo.CINI_MANAGER_ERRO_HISTORICO
+      WHERE  DTVISTO IS NOT NULL
+      GROUP  BY APLICACAO
+    `);
+    for (const r of ackRes.recordset) {
+      if (r.ULTIMA_CONFIRMACAO) {
+        acknowledgedAlertAt.set(r.APLICACAO, new Date(r.ULTIMA_CONFIRMACAO).getTime());
+      }
+    }
+
+    console.log(`[db] historicos: ${deployHistory.length} deploys, ${errorHistory.length} erros`);
+  } catch (e) {
+    console.error('[db] loadHistoriesFromDB:', e.message);
+  }
 }
 
 function bufferLog(appName, source, text) {
@@ -1257,9 +1419,7 @@ async function deployApp(appName) {
         await sendWhatsApp(wppMsg);
 
         const rec = { time: now(), app: appName, status: 'ok', detail: `alterações publicadas (${commitAfter})` };
-        deployHistory.unshift(rec);
-        if (deployHistory.length > 30) deployHistory.pop();
-        pushHistory();
+        addDeployHistory(rec);
         return rec;
       } else {
         const commitBefore = git('rev-parse --short HEAD', gitRoot);
@@ -1323,9 +1483,7 @@ async function deployApp(appName) {
           await sendWhatsApp(rollbackWpp);
 
           const rec = { time: now(), app: appName, status: 'error', detail: `Teste falhou (${commitAfter}) — rollback para ${commitBefore}` };
-          deployHistory.unshift(rec);
-          if (deployHistory.length > 30) deployHistory.pop();
-          pushHistory();
+          addDeployHistory(rec);
           throw new Error(`Teste falhou — código do remoto não rodou. Rollback para ${commitBefore}`);
         }
         if (!testPassed) throw new Error(online ? 'Smoke test HTTP falhou — app não responde corretamente' : 'App não ficou online após 25s');
@@ -1349,9 +1507,7 @@ async function deployApp(appName) {
         await sendWhatsApp(wppMsg);
 
         const rec = { time: now(), app: appName, status: 'ok', detail: changed ? `${commitBefore} → ${commitAfter}` : 'sem mudanças' };
-        deployHistory.unshift(rec);
-        if (deployHistory.length > 30) deployHistory.pop();
-        pushHistory();
+        addDeployHistory(rec);
         return rec;
       }
     } else {
@@ -1374,9 +1530,7 @@ async function deployApp(appName) {
       await sendWhatsApp(wppMsg);
 
       const rec = { time: now(), app: appName, status: 'ok', detail: 'sem git' };
-      deployHistory.unshift(rec);
-      if (deployHistory.length > 30) deployHistory.pop();
-      pushHistory();
+      addDeployHistory(rec);
       return rec;
     }
   } catch (err) {
@@ -1401,9 +1555,7 @@ async function deployApp(appName) {
     });
     await sendWhatsApp(wppMsg);
     const rec = { time: now(), app: appName, status: 'error', detail: err.message };
-    deployHistory.unshift(rec);
-    if (deployHistory.length > 30) deployHistory.pop();
-    pushHistory();
+    addDeployHistory(rec);
     throw err;
   } finally {
     deployLock.delete(appName);
@@ -1641,6 +1793,7 @@ app.get('/api/apps', async (req, res) => {
         hasAttention: !!attentionReason,
         attentionType,
         attentionReason,
+        attentionTs: alertTs,
       };
     });
     res.json(data);
@@ -1676,9 +1829,7 @@ app.post('/api/apps/:name/:action', async (req, res) => {
   try {
     await pm2Do(action, name);
     if (['restart','stop','start'].includes(action)) {
-      deployHistory.unshift({ time: now(), app: name, status: 'ok', detail: action });
-      if (deployHistory.length > 30) deployHistory.pop();
-      pushHistory();
+      addDeployHistory({ time: now(), app: name, status: 'ok', detail: action });
     }
     await notifyWhatsApp(`✅ Ação executada — ${appLabel(name)}`, [
       `📱 App: ${name}`,
@@ -1689,9 +1840,7 @@ app.post('/api/apps/:name/:action', async (req, res) => {
   } catch (e) {
     const wppMsg = `❌ *Ação falhou* — ${name}\n🔧 ${action}\n📅 ${now()}\n\n⚠️ ${e.message}`;
     sendWhatsApp(wppMsg);
-    deployHistory.unshift({ time: now(), app: name, status: 'error', detail: `${action} falhou: ${e.message}` });
-    if (deployHistory.length > 30) deployHistory.pop();
-    pushHistory();
+    addDeployHistory({ time: now(), app: name, status: 'error', detail: `${action} falhou: ${e.message}` });
     res.status(500).json({ error: e.message });
   }
 });
@@ -1705,6 +1854,9 @@ app.post('/api/apps/:name/ack-errors', (req, res) => {
   delete pollErrors[name];
   delete pollErrorAt[name];
 
+  errorHistory.filter(e => e.app === name && !e.seen).forEach(e => { e.seen = true; });
+  ackErrorsInDB(name);
+
   res.json({ ok: true, app: name, cleared: true });
 });
 
@@ -1717,17 +1869,13 @@ app.post('/api/apps/reset-restarts', async (req, res) => {
   for (const name of appNames) {
     try {
       await pm2Do('reset', name);
-      deployHistory.unshift({ time: now(), app: name, status: 'ok', detail: 'reset restarts' });
-      if (deployHistory.length > 30) deployHistory.pop();
+      addDeployHistory({ time: now(), app: name, status: 'ok', detail: 'reset restarts' });
       results.push({ app: name, ok: true });
     } catch (e) {
-      deployHistory.unshift({ time: now(), app: name, status: 'error', detail: `reset restarts falhou: ${e.message}` });
-      if (deployHistory.length > 30) deployHistory.pop();
+      addDeployHistory({ time: now(), app: name, status: 'error', detail: `reset restarts falhou: ${e.message}` });
       results.push({ app: name, ok: false, error: e.message });
     }
   }
-
-  pushHistory();
 
   const failed = results.filter(item => !item.ok);
   if (failed.length) {
@@ -1757,9 +1905,7 @@ app.post('/api/all/:action', async (req, res) => {
     return res.status(400).json({ error: 'Ação inválida' });
   try {
     await pm2Do(action, 'all');
-    deployHistory.unshift({ time: now(), app: 'TODOS', status: 'ok', detail: action });
-    if (deployHistory.length > 30) deployHistory.pop();
-    pushHistory();
+    addDeployHistory({ time: now(), app: 'TODOS', status: 'ok', detail: action });
     await notifyWhatsApp('✅ Ação em lote executada', [
       '📱 Escopo: todos os apps',
       `🔧 Ação: ${action}`,
@@ -1769,9 +1915,7 @@ app.post('/api/all/:action', async (req, res) => {
   } catch (e) {
     const wppMsg = `❌ *Ação falhou* — TODOS\n🔧 ${action}\n📅 ${now()}\n\n⚠️ ${e.message}`;
     sendWhatsApp(wppMsg);
-    deployHistory.unshift({ time: now(), app: 'TODOS', status: 'error', detail: `${action} falhou` });
-    if (deployHistory.length > 30) deployHistory.pop();
-    pushHistory();
+    addDeployHistory({ time: now(), app: 'TODOS', status: 'error', detail: `${action} falhou` });
     res.status(500).json({ error: e.message });
   }
 });
@@ -2106,6 +2250,19 @@ app.post('/api/groups', async (req, res) => {
   }
 });
 
+app.delete('/api/groups/:id', async (req, res) => {
+  try {
+    const removed = await deleteServiceGroup(req.params.id);
+    await notifyWhatsApp('🗑 Grupo removido no dashboard', [
+      `📛 Grupo: ${removed.name}`,
+      '📌 Origem: dashboard',
+    ]);
+    res.json({ ok: true, group: removed });
+  } catch (e) {
+    res.status(400).json({ error: e.message || 'Falha ao excluir grupo' });
+  }
+});
+
 app.post('/api/autopoll/toggle', (req, res) => {
   autoPollCfg.enabled = !autoPollCfg.enabled;
   saveAutoPoll();
@@ -2154,4 +2311,8 @@ app.post('/api/autopoll/check-now', async (req, res) => {
   setImmediate(() => pollGitUpdates());
 });
 
-app.listen(PORT, () => console.log(`[dashboard] Rodando em http://localhost:${PORT}`));
+loadHistoriesFromDB().then(() => {
+  app.listen(PORT, () => console.log(`[dashboard] Rodando em http://localhost:${PORT}`));
+}).catch(() => {
+  app.listen(PORT, () => console.log(`[dashboard] Rodando em http://localhost:${PORT}`));
+});

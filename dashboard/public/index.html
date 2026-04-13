@@ -16,6 +16,7 @@
 body{background:var(--bg);color:var(--text);font-family:'Cascadia Code','Fira Code',Consolas,monospace;font-size:13px;min-height:100vh;overflow-x:hidden}
 .layout{display:flex;flex-direction:column;height:100vh}
 .topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 20px;display:flex;align-items:center;gap:12px;flex-shrink:0;flex-wrap:wrap}
+.subbar{background:var(--surface);border-bottom:1px solid var(--border);padding:6px 20px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .main{display:flex;flex:1;overflow:hidden}
 .sidebar{width:280px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
 .content{flex:1;overflow-y:auto;padding:16px}
@@ -31,7 +32,10 @@ body{background:var(--bg);color:var(--text);font-family:'Cascadia Code','Fira Co
 .polling-badge{display:inline-flex;align-items:center;gap:6px;line-height:1;overflow:visible;padding:4px 8px}
 .polling-badge .spin{width:12px;height:12px;border-width:2px;margin-right:0;flex-shrink:0}
 .topbar-right{margin-left:auto;display:flex;align-items:center;gap:6px}
-.group-nav{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.group-nav{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-left:14px}
+.group-actions{display:flex;align-items:center;gap:6px}
+.subbar-left{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:30px}
+.subbar-right{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 .btn{background:var(--btn);border:1px solid var(--border);color:var(--text);padding:4px 10px;border-radius:5px;cursor:pointer;font-family:inherit;font-size:12px;transition:background .15s;white-space:nowrap}
 .btn:hover{background:var(--btn-hover)}
 .btn:disabled{opacity:.4;cursor:not-allowed}
@@ -53,7 +57,7 @@ body{background:var(--bg);color:var(--text);font-family:'Cascadia Code','Fira Co
 .card.dragging{opacity:.55;transform:scale(.99)}
 .card-header{display:flex;align-items:center;gap:8px;margin-bottom:10px}
 .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-.dot-green{background:var(--green);box-shadow:0 0 5px var(--green)}
+.dot-green{background:var(--green);box-shadow:0 0 6px var(--green);animation:pulse 1.5s infinite}
 .dot-red{background:var(--red)}
 .dot-red-alert{background:var(--red);box-shadow:0 0 8px var(--red);animation:pulse 1s infinite}
 .dot-yellow{background:var(--yellow);box-shadow:0 0 5px var(--yellow);animation:pulse 1.2s infinite}
@@ -84,7 +88,11 @@ body{background:var(--bg);color:var(--text);font-family:'Cascadia Code','Fira Co
 .h-app{font-weight:600;font-size:12px}
 .h-detail{color:var(--muted);font-size:10px;margin-top:2px;word-break:break-all}
 .h-time{color:var(--muted);font-size:10px;margin-top:1px}
-.log-header{display:flex;align-items:center;gap:6px;padding:6px 14px;border-bottom:1px solid var(--border);background:var(--surface2)}
+.log-header{display:flex;flex-direction:column;gap:0;padding:6px 14px;border-bottom:1px solid var(--border);background:var(--surface2)}
+.log-header-main{display:flex;align-items:center;gap:6px}
+.log-filters-row{display:none;padding:4px 0 2px;flex-wrap:wrap;gap:4px}
+.log-filter-chip.active{background:#0d1f3c;border-color:#2d63b9;color:#9bc7ff}
+mark.log-hl{background:#d29922;color:#000;border-radius:2px;padding:0 2px;font-style:normal}
 .log-title{font-weight:700;font-size:12px;flex:1}
 .log-body{height:calc(100% - 35px);overflow-y:auto;padding:6px 14px;font-size:12px;line-height:1.7}
 .ll{word-break:break-all;padding:0}
@@ -171,14 +179,19 @@ body{background:var(--bg);color:var(--text);font-family:'Cascadia Code','Fira Co
     <span id="bdg-on" class="badge badge-green">0 online</span>
     <span id="bdg-off" class="badge badge-red" style="display:none">0 offline</span>
     <span id="bdg-time" class="badge badge-muted">--:--</span>
-    <button class="btn btn-sm btn-blue" onclick="openGroupModal()">➕ Adicionar Grupo</button>
     <div id="group-nav" class="group-nav"></div>
-    <div class="topbar-right">
-      <button class="btn btn-sm" onclick="location.href='/logout'">🔐 Sair</button>
+  </div>
+  <div class="subbar">
+    <div class="subbar-left">
+      <button class="btn btn-sm btn-blue" onclick="openGroupModal()">Adicionar Grupo</button>
+      <div id="group-actions" class="group-actions"></div>
+    </div>
+    <div class="subbar-right">
       <button class="btn btn-sm btn-blue" onclick="openAutoPoll()" id="btn-autopoll">🔄 Auto-deploy</button>
       <button class="btn btn-sm btn-yellow" onclick="openRestartResetModal()">🧹 Limpar restarts</button>
       <button class="btn btn-sm btn-orange" onclick="doDeployAll()">🚀 Deploy All</button>
-      <button class="btn btn-sm btn-red"    onclick="actionAll('stop')">⏹ Stop All</button>
+      <button class="btn btn-sm btn-red" onclick="actionAll('stop')">⏹ Stop All</button>
+      <button class="btn btn-sm" onclick="location.href='/logout'">🔐 Sair</button>
     </div>
   </div>
 
@@ -202,8 +215,14 @@ body{background:var(--bg);color:var(--text);font-family:'Cascadia Code','Fira Co
   <div class="bottom-panel" id="log-panel">
     <div class="resize-handle" id="resize-handle"></div>
     <div class="log-header">
-      <span class="log-title" id="log-title">Logs</span>
-      <button class="btn btn-sm btn-red" onclick="closeLog()">✕</button>
+      <div class="log-header-main">
+        <span class="log-title" id="log-title">Logs</span>
+        <input id="log-txid" class="btn" style="margin-left:10px;width:150px" placeholder="Buscar nos logs" oninput="onLogFilterInput()" />
+        <input id="log-date" class="btn" style="margin-left:6px;width:160px" placeholder="Data/Hora (ex: 2026-04-13)" oninput="filterLogLines(true)" />
+        <button id="btn-scroll-bottom" class="btn btn-sm btn-green" style="display:none;margin-left:8px" onclick="scrollLogToBottom()">Ir para o fim</button>
+        <button class="btn btn-sm btn-red" onclick="closeLog()">✕</button>
+      </div>
+      <div class="log-filters-row" id="log-filters-row"></div>
     </div>
     <div class="log-body" id="log-body"></div>
   </div>
@@ -294,6 +313,10 @@ body{background:var(--bg);color:var(--text);font-family:'Cascadia Code','Fira Co
       <button class="btn btn-sm" onclick="closeErrorModal()">✕</button>
     </div>
     <div class="modal-body" id="error-body"><span class="spin"></span> Carregando erro...</div>
+    <div class="modal-footer">
+      <button class="btn btn-green" onclick="markErrorAsSeen()">✓ Marcar como visto</button>
+      <button class="btn" onclick="closeErrorModal()">Fechar</button>
+    </div>
   </div>
 </div>
 
@@ -303,6 +326,8 @@ let autoPollRefreshTimer = null;
 let historyMode = 'deploy';
 let deployHistoryItems = [];
 let errorHistoryItems = [];
+const dismissedApps = new Map(); // name -> ackTime (client timestamp)
+let currentErrorModalApp = null;
 let groups = [];
 let selectedGroupId = 'all';
 const DOCS_APPS = new Set([
@@ -328,9 +353,45 @@ function getAppUrl(app) {
 const DISPLAY_NAMES = {
   'erp-cini':        'Gestão Portaria',
   'cini-dashboard':  'Cini Manager',
+  'client-baixas-pix': 'Baixas PIX',
+  'central-notificacoes': 'Central Notificações',
+  'wf-cini': 'Workflow Cini',
+  'api-weduu': 'API Weduu',
+  'central-tarefas': 'Central de Tarefas',
+  'hub-cini': 'HUB Cini',
+  'cini-pricing': 'Pricing Cini',
+  'api-sicredi': 'API Sicredi',
+  'notificador-pix': 'Notificações PIX',
+  'whatsapp-bot': 'BOT WhatsApp',
+  'portal-consultas': 'Portal de Consultas',
+  'portal-streamlit': 'Portal Stremalit',
+  'gerenciador-cargas': 'Portal de Cargas',
+  'whatsapp-motoristas': 'Tracking',
+  'whatsapp-webnode': 'Cini Notifica e WB Sicredi',
 };
 function displayName(name) { return DISPLAY_NAMES[name] || name; }
 const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+const SERVICE_LOG_FILTERS = {
+  'client-baixas-pix':   [{l:'Erro',t:'error'},{l:'TXID',t:'txid'},{l:'Baixa',t:'baixa'},{l:'PIX',t:'pix'},{l:'Webhook',t:'webhook'},{l:'Timeout',t:'timeout'},{l:'SQL',t:'sql'}],
+  'notificador-pix':     [{l:'Erro',t:'error'},{l:'TXID',t:'txid'},{l:'PIX',t:'pix'},{l:'Enviado',t:'enviado'},{l:'Falha',t:'falha'},{l:'Timeout',t:'timeout'}],
+  'api-sicredi':         [{l:'Erro',t:'error'},{l:'PIX',t:'pix'},{l:'Boleto',t:'boleto'},{l:'Cobrança',t:'cobranc'},{l:'Token',t:'token'},{l:'Timeout',t:'timeout'},{l:'Webhook',t:'webhook'}],
+  'erp-cini':            [{l:'Erro',t:'error'},{l:'Entrada',t:'entrada'},{l:'Saída',t:'saida'},{l:'Usuário',t:'usuario'},{l:'SQL',t:'sql'},{l:'Acesso negado',t:'acesso negado'}],
+  'portal-consultas':    [{l:'Erro',t:'error'},{l:'SQL',t:'sql'},{l:'Request',t:'request'},{l:'Auth',t:'auth'},{l:'Timeout',t:'timeout'},{l:'500',t:' 500'},{l:'404',t:' 404'}],
+  'wf-cini':             [{l:'Erro',t:'error'},{l:'Workflow',t:'workflow'},{l:'Tarefa',t:'tarefa'},{l:'Aprovação',t:'aprov'},{l:'Usuário',t:'usuario'}],
+  'central-tarefas':     [{l:'Erro',t:'error'},{l:'Tarefa',t:'tarefa'},{l:'Usuário',t:'usuario'},{l:'Notif',t:'notif'},{l:'Criada',t:'criada'},{l:'Concluída',t:'conclu'}],
+  'hub-cini':            [{l:'Erro',t:'error'},{l:'Request',t:'request'},{l:'Response',t:'response'},{l:'Auth',t:'auth'},{l:'Timeout',t:'timeout'}],
+  'cini-pricing':        [{l:'Erro',t:'error'},{l:'Tabela',t:'tabela'},{l:'Preço',t:'preco'},{l:'Cálculo',t:'calc'},{l:'Produto',t:'produto'}],
+  'api-weduu':           [{l:'Erro',t:'error'},{l:'Pedido',t:'pedido'},{l:'Webhook',t:'webhook'},{l:'Auth',t:'auth'},{l:'Timeout',t:'timeout'}],
+  'whatsapp-bot':        [{l:'Erro',t:'error'},{l:'Mensagem',t:'mensagem'},{l:'Enviado',t:'enviado'},{l:'Recebido',t:'recebido'},{l:'QR Code',t:'qr'},{l:'Sessão',t:'session'},{l:'Reconectando',t:'reconect'}],
+  'webhook-whatsapp':    [{l:'Erro',t:'error'},{l:'Webhook',t:'webhook'},{l:'Enviado',t:'enviado'},{l:'Recebido',t:'recebido'},{l:'Falha',t:'falha'}],
+  'whatsapp-motoristas': [{l:'Erro',t:'error'},{l:'Motorista',t:'motorista'},{l:'Localização',t:'localiz'},{l:'Mensagem',t:'mensagem'},{l:'Conectado',t:'conectado'}],
+  'whatsapp-webnode':    [{l:'Erro',t:'error'},{l:'Enviado',t:'enviado'},{l:'Falha',t:'falha'},{l:'Sessão',t:'session'},{l:'Reconectando',t:'reconect'}],
+  'central-notificacoes':[{l:'Erro',t:'error'},{l:'Email',t:'email'},{l:'WhatsApp',t:'whatsapp'},{l:'Enviado',t:'enviado'},{l:'Falha',t:'falha'},{l:'Fila',t:'fila'}],
+  'gerenciador-cargas':  [{l:'Erro',t:'error'},{l:'Upload',t:'upload'},{l:'Carga',t:'carga'},{l:'Processado',t:'process'},{l:'Falha',t:'falha'}],
+  'cini-dashboard':      [{l:'Erro',t:'error'},{l:'Deploy',t:'deploy'},{l:'Auth',t:'auth'},{l:'Request',t:'request'}],
+};
+const DEFAULT_LOG_FILTERS = [{l:'Erro',t:'error'},{l:'Warning',t:'warn'},{l:'Request',t:'request'},{l:'Timeout',t:'timeout'}];
 
 function toast(msg, type='ok') {
   const el = Object.assign(document.createElement('div'), {className:`toast toast-${type}`, textContent:msg});
@@ -375,6 +436,18 @@ function fmtUptime(ms) {
 async function loadApps() {
   try {
     apps = await api('GET', '/api/apps');
+    for (const app of apps) {
+      if (!app.hasAttention) continue;
+      const ackTime = dismissedApps.get(app.name);
+      if (ackTime == null) continue;
+      if ((app.attentionTs || 0) <= ackTime) {
+        app.hasAttention = false;
+        app.attentionType = null;
+        app.attentionReason = null;
+      } else {
+        dismissedApps.delete(app.name);
+      }
+    }
     await loadGroups();
     renderGrid();
     renderHeader();
@@ -398,6 +471,22 @@ function renderGroupNav() {
   const base = [`<button class="btn btn-sm btn-group-chip ${selectedGroupId==='all'?'active':''}" onclick="selectGroup('all')">Todos</button>`];
   const chips = groups.map(g => `<button class="btn btn-sm btn-group-chip ${String(selectedGroupId)===String(g.id)?'active':''}" onclick="selectGroup('${g.id}')">${esc(g.name)}</button>`);
   el.innerHTML = [...base, ...chips].join('');
+  renderGroupActions();
+}
+
+function renderGroupActions() {
+  const el = document.getElementById('group-actions');
+  if (!el) return;
+  if (selectedGroupId === 'all') {
+    el.innerHTML = '';
+    return;
+  }
+  const group = groups.find(g => String(g.id) === String(selectedGroupId));
+  if (!group) {
+    el.innerHTML = '';
+    return;
+  }
+  el.innerHTML = `<button class="btn btn-sm btn-red" onclick="deleteSelectedGroup()">🗑 Excluir grupo: ${esc(group.name)}</button>`;
 }
 
 function selectGroup(groupId) {
@@ -599,6 +688,24 @@ async function confirmCreateGroup() {
     await loadGroups();
     selectedGroupId = String(result.group.id);
     renderGroupNav();
+    renderGrid();
+    renderHeader();
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+}
+
+async function deleteSelectedGroup() {
+  if (selectedGroupId === 'all') return;
+  const group = groups.find(g => String(g.id) === String(selectedGroupId));
+  if (!group) return;
+  if (!confirm(`Excluir o grupo "${group.name}"?`)) return;
+
+  try {
+    await api('DELETE', `/api/groups/${group.id}`);
+    toast(`Grupo "${group.name}" excluído`);
+    selectedGroupId = 'all';
+    await loadGroups();
     renderGrid();
     renderHeader();
   } catch (e) {
@@ -839,11 +946,20 @@ function appendLine(source, text, time) {
   const body = document.getElementById('log-body');
   const d = document.createElement('div');
   d.className = `ll ll-${source}`;
+  d.dataset.rawText = text;
   const t = time ? new Date(time).toLocaleTimeString('pt-BR') : '';
-  d.innerHTML = `${t ? `<span class="ll-time">${t}</span>` : ''}${esc(text)}`;
+  d.innerHTML = `${t ? `<span class="ll-time">${t}</span>` : ''}<span class="ll-text">${esc(text)}</span>`;
   body.appendChild(d);
   while (body.children.length > 2000) body.removeChild(body.firstChild);
   if (autoScroll) body.scrollTop = body.scrollHeight;
+  const txid = (document.getElementById('log-txid')?.value || '').trim().toLowerCase();
+  const date = (document.getElementById('log-date')?.value || '').trim();
+  if (txid || date) {
+    const full = d.textContent.toLowerCase();
+    const show = (!txid || full.includes(txid)) && (!date || full.includes(date));
+    d.style.display = show ? '' : 'none';
+    if (show && txid) highlightLine(d, txid);
+  }
 }
 
 function appendSeparator(label) {
@@ -861,6 +977,10 @@ async function openLog(name) {
   document.getElementById('log-body').innerHTML = '<div style="color:#8b949e;padding:4px 0" data-loading>Carregando histórico...</div>';
   if (sse) { sse.close(); sse = null; }
   sseLogName = name;
+  if (document.getElementById('log-txid')) document.getElementById('log-txid').value = '';
+  if (document.getElementById('log-date')) document.getElementById('log-date').value = '';
+  document.querySelectorAll('.log-filter-chip').forEach(c => c.classList.remove('active'));
+  renderLogFilters(name);
 
   api('GET', `/api/apps/${name}/logfiles?lines=1200`).then(files => {
     const body = document.getElementById('log-body');
@@ -877,7 +997,8 @@ async function openLog(name) {
         for (const line of f.lines) {
           const d = document.createElement('div');
           d.className = `ll ll-${f.source || 'stdout'}`;
-          d.textContent = line;
+          d.dataset.rawText = line;
+          d.innerHTML = `<span class="ll-text">${esc(line)}</span>`;
           frag.appendChild(d);
         }
       }
@@ -898,6 +1019,88 @@ async function openLog(name) {
     if (sseLogName === name) connectLogSSE(name);
   });
 }
+
+function filterLogLines(disableScroll) {
+  const txid = (document.getElementById('log-txid')?.value || '').trim().toLowerCase();
+  const date = (document.getElementById('log-date')?.value || '').trim();
+  const lines = Array.from(document.querySelectorAll('#log-body .ll'));
+  lines.forEach(line => {
+    const span = line.querySelector('.ll-text');
+    if (span && line.dataset.rawText !== undefined) span.textContent = line.dataset.rawText;
+    const text = line.textContent.toLowerCase();
+    let show = true;
+    if (txid && !text.includes(txid)) show = false;
+    if (date && !text.includes(date)) show = false;
+    line.style.display = show ? '' : 'none';
+    if (show && txid) highlightLine(line, txid);
+  });
+  if (disableScroll) setAutoScroll(false);
+}
+
+function highlightLine(lineEl, term) {
+  const span = lineEl.querySelector('.ll-text');
+  if (!span) return;
+  const raw = lineEl.dataset.rawText ?? span.textContent;
+  const lc = raw.toLowerCase();
+  let html = '', i = 0;
+  while (i < raw.length) {
+    const idx = lc.indexOf(term, i);
+    if (idx === -1) { html += esc(raw.slice(i)); break; }
+    html += esc(raw.slice(i, idx));
+    html += `<mark class="log-hl">${esc(raw.slice(idx, idx + term.length))}</mark>`;
+    i = idx + term.length;
+  }
+  span.innerHTML = html;
+}
+
+function renderLogFilters(name) {
+  const row = document.getElementById('log-filters-row');
+  if (!row) return;
+  const filters = SERVICE_LOG_FILTERS[name] || DEFAULT_LOG_FILTERS;
+  row.style.display = 'flex';
+  row.innerHTML = filters.map(f =>
+    `<button class="btn btn-sm log-filter-chip" onclick="toggleLogFilter(this,'${esc(f.t)}')">${esc(f.l)}</button>`
+  ).join('');
+}
+
+function toggleLogFilter(btn, term) {
+  const input = document.getElementById('log-txid');
+  const wasActive = btn.classList.contains('active');
+  document.querySelectorAll('.log-filter-chip').forEach(c => c.classList.remove('active'));
+  if (wasActive) {
+    input.value = '';
+  } else {
+    input.value = term;
+    btn.classList.add('active');
+  }
+  filterLogLines(true);
+}
+
+function onLogFilterInput() {
+  document.querySelectorAll('.log-filter-chip').forEach(c => c.classList.remove('active'));
+  filterLogLines(true);
+}
+
+function setAutoScroll(val) {
+  autoScroll = val;
+  document.getElementById('btn-scroll-bottom').style.display = autoScroll ? 'none' : '';
+}
+
+function scrollLogToBottom() {
+  const body = document.getElementById('log-body');
+  body.scrollTop = body.scrollHeight;
+  setAutoScroll(true);
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  const logBody = document.getElementById('log-body');
+  if (logBody) {
+    logBody.addEventListener('scroll', function() {
+      const atBottom = logBody.scrollHeight - logBody.scrollTop - logBody.clientHeight < 5;
+      setAutoScroll(atBottom);
+    });
+  }
+});
 
 function connectLogSSE(name) {
   if (sse) { sse.close(); sse = null; }
@@ -1023,7 +1226,6 @@ function renderDiff(data) {
   let inFile = false;
   for (const raw of lines) {
     if (raw.startsWith('diff --git ')) {
-      // extract file path: "diff --git a/foo/bar.php b/foo/bar.php"
       const m = raw.match(/b\/(.+)$/);
       const filePath = m ? m[1] : raw.slice(11);
       html += `<div class="diff-file">📄 ${esc(filePath)}</div>`;
@@ -1037,7 +1239,6 @@ function renderDiff(data) {
     } else if (inFile && (raw.startsWith(' ') || raw === '')) {
       html += `<span class="diff-ctx">${esc(raw)}</span>`;
     }
-    // skip index/--- /+++ header lines
   }
   if (!html) html = '<div class="empty">Nenhum diff disponível.</div>';
   document.getElementById('diff-body').innerHTML = `<div class="diff-wrap">${html}</div>`;
@@ -1293,23 +1494,20 @@ function startErrorHistorySSE() {
   es.onerror   = () => setTimeout(startErrorHistorySSE, 5000);
 }
 
+async function markErrorAsSeen() {
+  if (!currentErrorModalApp) { closeErrorModal(); return; }
+  dismissedApps.set(currentErrorModalApp, Date.now());
+  document.getElementById('error-modal').classList.remove('open');
+  try { await fetch(`/api/apps/${encodeURIComponent(currentErrorModalApp)}/ack-errors`, { method: 'POST' }); } catch {}
+  await loadApps();
+}
+
 async function openErrorModal(name) {
+  currentErrorModalApp = name;
+
   document.getElementById('error-title').textContent = `🔴 Erro — ${displayName(name)}`;
   document.getElementById('error-body').innerHTML = '<span class="spin"></span> Carregando detalhes...';
   document.getElementById('error-modal').classList.add('open');
-
-  const appEntry = apps.find(a => a.name === name);
-  if (appEntry) {
-    appEntry.hasAttention = false;
-    appEntry.attentionType = null;
-    appEntry.attentionReason = null;
-    renderGrid();
-    renderHeader();
-  }
-
-  api('POST', `/api/apps/${name}/ack-errors`)
-    .then(() => loadApps())
-    .catch(() => {});
 
   try {
     const data = await api('GET', `/api/apps/${name}/error-detail`);
@@ -1360,7 +1558,10 @@ async function openErrorHistoryItem(id) {
   }
 }
 
-function closeErrorModal() { document.getElementById('error-modal').classList.remove('open'); }
+async function closeErrorModal() {
+  document.getElementById('error-modal').classList.remove('open');
+  await loadApps();
+}
 document.getElementById('error-modal').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeErrorModal(); });
 
 (function(){
