@@ -124,7 +124,9 @@ async function notifyWhatsApp(title, lines = []) {
 const runtimeAlerts = new Map();
 const logAlertThrottle = new Map();
 const gitAlertThrottle = new Map();
-const LOG_ALERT_WINDOW_MS = 10 * 60 * 1000;
+const APP_ERROR_DUP_WINDOW_MS = 1000;
+const GIT_ALERT_DUP_WINDOW_MS = 1000;
+const PM2_EVENT_DUP_WINDOW_MS = 1000;
 const ALERT_VISIBLE_MS = 6 * 60 * 60 * 1000;
 const LOG_ERROR_PATTERNS = [
   /(^|\b)(error|exception|fatal|traceback|unhandled|failed|failure|critical|panic)(\b|:)/i,
@@ -227,7 +229,7 @@ async function notifyAppLogError(appName, source, text) {
 
   const signature = `${appName}:${source}:${classifyLogAlert(text)}`;
   const lastSent = logAlertThrottle.get(signature) || 0;
-  if (Date.now() - lastSent < LOG_ALERT_WINDOW_MS) return;
+  if (Date.now() - lastSent < APP_ERROR_DUP_WINDOW_MS) return;
   logAlertThrottle.set(signature, Date.now());
 
   rememberRuntimeAlert(appName, 'runtime', text);
@@ -245,7 +247,7 @@ async function notifyAppLogError(appName, source, text) {
 async function notifyGitPollError(appName, message) {
   const signature = `${appName}:${normalizeErrorSignature(message)}`;
   const lastSent = gitAlertThrottle.get(signature) || 0;
-  if (Date.now() - lastSent < LOG_ALERT_WINDOW_MS) return;
+  if (Date.now() - lastSent < GIT_ALERT_DUP_WINDOW_MS) return;
   gitAlertThrottle.set(signature, Date.now());
   rememberRuntimeAlert(appName, 'git', message);
   await notifyWhatsApp(`⛔ Falha Git/Polling — ${appLabel(appName)}`, [
@@ -260,7 +262,7 @@ async function notifyPm2EventError(appName, event) {
 
   const signature = `${appName}:pm2-event:${String(event).toLowerCase()}`;
   const lastSent = logAlertThrottle.get(signature) || 0;
-  if (Date.now() - lastSent < LOG_ALERT_WINDOW_MS) return;
+  if (Date.now() - lastSent < PM2_EVENT_DUP_WINDOW_MS) return;
   logAlertThrottle.set(signature, Date.now());
 
   rememberRuntimeAlert(appName, 'runtime', `evento PM2: ${event}`);
