@@ -1,0 +1,13 @@
+{
+  "name": "cini-monitor",
+  "version": "1.0.0",
+  "description": "Monitoramento de logs e alertas via WhatsApp para apps PM2",
+  "main": "log-watcher.js",
+  "scripts": {
+    "start": "node log-watcher.js"
+  },
+  "dependencies": {
+    "mssql": "^11.0.1",
+    "pm2": "^5.3.1"
+  }
+}

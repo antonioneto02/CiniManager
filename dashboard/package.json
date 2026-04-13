@@ -1,0 +1,13 @@
+{
+  "name": "cini-dashboard",
+  "version": "1.0.0",
+  "description": "Dashboard de monitoramento dos apps PM2",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "pm2": "^5.3.1"
+  }
+}

@@ -1,0 +1,54 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main          
+  workflow_dispatch:  
+
+jobs:
+  deploy:
+    name: Deploy no servidor
+    runs-on: self-hosted   
+
+    env:
+      APP_NAME: "api-sicredi"
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Instalar dependências
+        run: npm ci --omit=dev
+
+      - name: Reload no PM2
+        shell: powershell
+        run: |
+          $pm2List = pm2 jlist 2>$null | ConvertFrom-Json
+          $running = $pm2List | Where-Object { $_.name -eq "${{ env.APP_NAME }}" }
+
+          if ($running) {
+            pm2 reload ${{ env.APP_NAME }}
+          } else {
+            pm2 start "E:/Projetos/ecosystem.config.js" --only ${{ env.APP_NAME }}
+          }
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Falha ao recarregar ${{ env.APP_NAME }}"
+            exit 1
+          }
+
+      - name: Verificar status
+        shell: powershell
+        run: |
+          Start-Sleep -Seconds 3
+          $pm2List = pm2 jlist 2>$null | ConvertFrom-Json
+          $proc = $pm2List | Where-Object { $_.name -eq "${{ env.APP_NAME }}" }
+
+          if (-not $proc -or $proc.pm2_env.status -ne "online") {
+            Write-Error "App ${{ env.APP_NAME }} não está online após o deploy!"
+            pm2 logs ${{ env.APP_NAME }} --lines 20 --nostream
+            exit 1
+          }
+
+          Write-Host "Deploy concluído com sucesso! Status: $($proc.pm2_env.status)"

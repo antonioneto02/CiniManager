@@ -1,0 +1,983 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>CINI Manager</title>
+<link rel="icon" type="image/png" href="/Cini.png"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;--surface:#161b22;--surface2:#21262d;--border:#30363d;
+  --text:#e6edf3;--muted:#8b949e;--green:#3fb950;--red:#f85149;
+  --yellow:#d29922;--blue:#58a6ff;--orange:#ffa657;
+  --btn:#21262d;--btn-hover:#30363d;
+}
+body{background:var(--bg);color:var(--text);font-family:'Cascadia Code','Fira Code',Consolas,monospace;font-size:13px;min-height:100vh;overflow-x:hidden}
+.layout{display:flex;flex-direction:column;height:100vh}
+.topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 20px;display:flex;align-items:center;gap:12px;flex-shrink:0;flex-wrap:wrap}
+.main{display:flex;flex:1;overflow:hidden}
+.sidebar{width:280px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
+.content{flex:1;overflow-y:auto;padding:16px}
+.bottom-panel{height:0;background:var(--surface);border-top:1px solid var(--border);overflow:hidden;flex-shrink:0;position:relative}
+.bottom-panel.open{height:300px}
+.resize-handle{position:absolute;top:0;left:0;right:0;height:6px;cursor:ns-resize;z-index:10;background:transparent}
+.resize-handle:hover,.resize-handle.active{background:var(--blue);opacity:.4}
+.logo{font-size:15px;font-weight:700;color:var(--text)}
+.badge{padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
+.badge-green{background:#0f2b1a;color:var(--green)}
+.badge-red{background:#2d0f0f;color:var(--red)}
+.badge-muted{background:var(--surface2);color:var(--muted)}
+.polling-badge{display:inline-flex;align-items:center;gap:6px;line-height:1;overflow:visible;padding:4px 8px}
+.polling-badge .spin{width:12px;height:12px;border-width:2px;margin-right:0;flex-shrink:0}
+.topbar-right{margin-left:auto;display:flex;align-items:center;gap:6px}
+.btn{background:var(--btn);border:1px solid var(--border);color:var(--text);padding:4px 10px;border-radius:5px;cursor:pointer;font-family:inherit;font-size:12px;transition:background .15s;white-space:nowrap}
+.btn:hover{background:var(--btn-hover)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-green{border-color:#0f2b1a;color:var(--green)}.btn-green:hover{background:#0f2b1a}
+.btn-red{border-color:#2d0f0f;color:var(--red)}.btn-red:hover{background:#2d0f0f}
+.btn-blue{border-color:#0d1f3c;color:var(--blue)}.btn-blue:hover{background:#0d1f3c}
+.btn-orange{border-color:#2d1f00;color:var(--orange)}.btn-orange:hover{background:#2d1f00}
+.btn-sm{padding:3px 8px;font-size:11px}
+.cards-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;border-left:3px solid var(--border)}
+.card.online{border-left-color:var(--green)}
+.card.stopped{border-left-color:var(--muted)}
+.card.errored{border-left-color:var(--red)}
+.card.deploying{border-left-color:var(--yellow)}
+.card-header{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.dot-green{background:var(--green);box-shadow:0 0 5px var(--green)}
+.dot-red{background:var(--red)}
+.dot-yellow{background:var(--yellow);box-shadow:0 0 5px var(--yellow);animation:pulse 1.2s infinite}
+.dot-gray{background:var(--muted)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.card-name{font-weight:700;font-size:14px;flex:1}
+.card-pid{color:var(--muted);font-size:10px}
+.metrics{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px}
+.metric{background:var(--surface2);border-radius:4px;padding:5px 8px}
+.m-label{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.4px}
+.m-val{font-size:13px;font-weight:600;margin-top:2px}
+.card-actions{display:flex;gap:5px;flex-wrap:wrap}
+.restart-warn{color:var(--yellow);font-size:11px;margin-bottom:8px}
+.last-commit{font-size:11px;color:var(--muted);margin-bottom:8px;display:flex;align-items:baseline;gap:5px;overflow:hidden}
+.lc-hash{font-family:inherit;color:var(--blue);flex-shrink:0}
+.lc-subject{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text)}
+.lc-date{flex-shrink:0;color:var(--muted);font-size:10px}
+.sidebar-title{padding:10px 14px;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);border-bottom:1px solid var(--border)}
+.sidebar-body{flex:1;overflow-y:auto;padding:8px}
+.h-item{padding:7px 8px;border-radius:4px;margin-bottom:4px;border-left:2px solid transparent}
+.h-ok{border-color:var(--green);background:#0a1a10}
+.h-error{border-color:var(--red);background:#1a0a0a}
+.h-app{font-weight:600;font-size:12px}
+.h-detail{color:var(--muted);font-size:10px;margin-top:2px;word-break:break-all}
+.h-time{color:var(--muted);font-size:10px;margin-top:1px}
+.log-header{display:flex;align-items:center;gap:6px;padding:6px 14px;border-bottom:1px solid var(--border);background:var(--surface2)}
+.log-title{font-weight:700;font-size:12px;flex:1}
+.log-body{height:calc(100% - 35px);overflow-y:auto;padding:6px 14px;font-size:12px;line-height:1.7}
+.ll{word-break:break-all;padding:0}
+.ll-stdout{color:#c9d1d9}
+.ll-stderr{color:#c9d1d9}
+.ll-pm2{color:var(--blue)}
+.ll-deploy{color:var(--yellow)}
+.ll-time{color:var(--muted);margin-right:6px;font-size:10px}
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:100;align-items:center;justify-content:center}
+.modal-bg.open{display:flex}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:10px;width:720px;max-width:96vw;max-height:88vh;display:flex;flex-direction:column}
+.modal-head{padding:12px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+.modal-head-title{font-weight:700;font-size:14px;flex:1}
+.modal-body{flex:1;overflow-y:auto;padding:16px}
+.modal-footer{padding:10px 18px;border-top:1px solid var(--border);display:flex;gap:8px}
+.section{margin-bottom:18px}
+.section-title{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px}
+.info-row{display:flex;gap:8px;align-items:baseline;margin-bottom:5px}
+.info-lbl{color:var(--muted);font-size:11px;width:90px;flex-shrink:0}
+.info-val{font-size:12px}
+.commit-tbl{width:100%;border-collapse:collapse}
+.commit-tbl td{padding:5px 6px;border-bottom:1px solid var(--border);vertical-align:top}
+.commit-tbl tr:last-child td{border-bottom:none}
+.c-hash{color:var(--blue);font-size:11px;white-space:nowrap}
+.c-msg{color:var(--text);font-size:12px}
+.c-meta{color:var(--muted);font-size:10px;white-space:nowrap}
+.tr-pending td{background:#1a1500}
+.badge-pending{background:#2d1f00;color:var(--orange);padding:2px 8px;border-radius:10px;font-size:11px}
+.deploy-flow{display:flex;flex-direction:column;gap:8px;margin:12px 0}
+.deploy-step{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--surface2);border-radius:6px;font-size:12px}
+.deploy-step-num{background:var(--blue);color:#000;font-weight:700;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0}
+.change-list{max-height:160px;overflow-y:auto;background:var(--bg);border-radius:6px;padding:8px 10px;font-size:11px;line-height:1.8}
+.change-item{display:flex;gap:6px}
+.change-type{font-weight:700;width:16px;flex-shrink:0;text-align:center}
+.change-type-m{color:var(--yellow)}
+.change-type-a{color:var(--green)}
+.change-type-d{color:var(--red)}
+.change-type-u{color:var(--muted)}
+.mode-badge{display:inline-block;padding:3px 10px;border-radius:10px;font-size:11px;font-weight:700}
+.mode-local{background:#2d1f00;color:var(--orange)}
+.mode-remote{background:#0d1f3c;color:var(--blue)}
+.mode-uptodate{background:#0f2b1a;color:var(--green)}
+.readme-content{font-size:13px;line-height:1.8;color:var(--text)}
+.readme-content h1{font-size:20px;margin:16px 0 8px;border-bottom:1px solid var(--border);padding-bottom:6px}
+.readme-content h2{font-size:16px;margin:14px 0 6px;color:var(--blue)}
+.readme-content h3{font-size:14px;margin:10px 0 4px;color:var(--text)}
+.readme-content p{margin:6px 0}
+.readme-content ul,.readme-content ol{margin:6px 0 6px 20px}
+.readme-content li{margin:3px 0}
+.readme-content code{background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:12px}
+.readme-content pre{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px;overflow-x:auto;margin:8px 0}
+.readme-content pre code{background:none;padding:0}
+.readme-content table{width:100%;border-collapse:collapse;margin:8px 0;font-size:12px}
+.readme-content table th,.readme-content table td{border:1px solid var(--border);padding:5px 8px;text-align:left}
+.readme-content table th{background:var(--surface2);font-weight:700}
+.diff-wrap{font-size:12px;line-height:1.55;overflow-x:auto}
+.diff-file{padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:5px;color:var(--blue);font-weight:700;margin:14px 0 0;font-size:11px;display:flex;align-items:center;gap:6px}
+.diff-file:first-child{margin-top:0}
+.diff-hunk{color:var(--muted);background:#0d1117;padding:2px 10px;font-size:11px;border-left:3px solid var(--border)}
+.diff-add{background:#0d2818;color:#3fb950;padding:0 10px;white-space:pre;display:block;border-left:3px solid var(--green)}
+.diff-del{background:#2d0f0f;color:#f85149;padding:0 10px;white-space:pre;display:block;border-left:3px solid var(--red)}
+.diff-ctx{color:var(--muted);padding:0 10px;white-space:pre;display:block;border-left:3px solid transparent}
+.diff-stat{color:var(--muted);font-size:11px;margin-bottom:12px;padding:8px 10px;background:var(--bg);border-radius:5px;white-space:pre-wrap}
+.c-hash-link{cursor:pointer;text-decoration:underline dotted}
+.c-hash-link:hover{color:#79c0ff}
+.readme-content blockquote{border-left:3px solid var(--blue);padding:4px 12px;margin:8px 0;color:var(--muted);font-style:italic}
+.readme-content hr{border:none;border-top:1px solid var(--border);margin:12px 0}
+.readme-content strong{color:var(--text);font-weight:700}
+.readme-content a{color:var(--blue);text-decoration:none}
+#toasts{position:fixed;top:14px;right:14px;z-index:200;display:flex;flex-direction:column;gap:6px}
+.toast{background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:9px 14px;max-width:320px;font-size:12px;animation:fadeIn .2s ease}
+.toast-ok{border-color:var(--green)}.toast-err{border-color:var(--red)}
+@keyframes fadeIn{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:none}}
+.spin{display:inline-block;width:10px;height:10px;border:2px solid var(--border);border-top-color:var(--blue);border-radius:50%;animation:_spin .6s linear infinite;vertical-align:middle;margin-right:4px;box-sizing:border-box;transform-origin:center}
+@keyframes _spin{to{transform:rotate(360deg)}}
+.empty{color:var(--muted);font-size:12px;padding:16px;text-align:center}
+::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+</style>
+</head>
+<body>
+<div class="layout">
+  <div class="topbar">
+    <span class="logo"><img src="/Cini.png" alt="CINI" style="height:22px;vertical-align:middle;margin-right:6px"/>CINI Manager</span>
+    <span id="bdg-on" class="badge badge-green">0 online</span>
+    <span id="bdg-off" class="badge badge-red" style="display:none">0 offline</span>
+    <span id="bdg-time" class="badge badge-muted">--:--</span>
+    <div class="topbar-right">
+      <button class="btn btn-sm btn-blue" onclick="openAutoPoll()" id="btn-autopoll">🔄 Auto-deploy</button>
+      <button class="btn btn-sm btn-orange" onclick="doDeployAll()">🚀 Deploy All</button>
+      <button class="btn btn-sm btn-red"    onclick="actionAll('stop')">⏹ Stop All</button>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="content">
+      <div id="grid" class="cards-grid">
+        <div class="empty"><span class="spin"></span> Carregando...</div>
+      </div>
+    </div>
+    <div class="sidebar">
+      <div class="sidebar-title">📋 Histórico de Deploys</div>
+      <div class="sidebar-body" id="history">
+        <div class="empty">Nenhum deploy ainda.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bottom-panel" id="log-panel">
+    <div class="resize-handle" id="resize-handle"></div>
+    <div class="log-header">
+      <span class="log-title" id="log-title">Logs</span>
+      <button class="btn btn-sm btn-red" onclick="closeLog()">✕</button>
+    </div>
+    <div class="log-body" id="log-body"></div>
+  </div>
+
+</div>
+
+<div class="modal-bg" id="git-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <span class="modal-head-title" id="git-title">Git</span>
+      <button class="btn btn-sm" onclick="closeGit()">✕</button>
+    </div>
+    <div class="modal-body" id="git-body"><span class="spin"></span> Carregando...</div>
+    <div class="modal-footer" id="git-footer"></div>
+  </div>
+</div>
+
+<div class="modal-bg" id="deploy-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <span class="modal-head-title" id="deploy-title">🚀 Deploy</span>
+      <button class="btn btn-sm" onclick="closeDeployModal()">✕</button>
+    </div>
+    <div class="modal-body" id="deploy-body"><span class="spin"></span> Verificando...</div>
+    <div class="modal-footer" id="deploy-footer"></div>
+  </div>
+</div>
+
+<div class="modal-bg" id="readme-modal">
+  <div class="modal" style="width:900px">
+    <div class="modal-head">
+      <span class="modal-head-title" id="readme-title">📄 Documentação</span>
+      <button class="btn btn-sm" onclick="closeReadme()">✕</button>
+    </div>
+    <div class="modal-body readme-content" id="readme-body"><span class="spin"></span> Carregando...</div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<div class="modal-bg" id="autopoll-modal">
+  <div class="modal" style="width:800px">
+    <div class="modal-head">
+      <span class="modal-head-title">🔄 Auto-deploy (Git Polling)</span>
+      <button class="btn btn-sm" onclick="closeAutoPoll()">✕</button>
+    </div>
+    <div class="modal-body" id="autopoll-body"><span class="spin"></span> Carregando...</div>
+    <div class="modal-footer" id="autopoll-footer"></div>
+  </div>
+</div>
+
+<div class="modal-bg" id="diff-modal">
+  <div class="modal" style="width:960px;max-height:92vh">
+    <div class="modal-head">
+      <span class="modal-head-title" id="diff-title">📄 Diff do commit</span>
+      <button class="btn btn-sm" onclick="closeDiff()">✕</button>
+    </div>
+    <div class="modal-body" id="diff-body" style="padding:12px 16px"><span class="spin"></span> Carregando diff...</div>
+  </div>
+</div>
+
+<script>
+let apps = [], sse = null, sseLogName = null, autoScroll = true, currentGit = null;
+let autoPollRefreshTimer = null;
+const DOCS_APPS = new Set([
+  'api-weduu','erp-cini','wf-cini','central-tarefas',
+  'hub-cini','cini-pricing','api-sicredi','notificador-pix',
+  'whatsapp-bot','webhook-whatsapp','whatsapp-motoristas',
+  'whatsapp-webnode','portal-consultas','central-notificacoes',
+  'client-baixas-pix','gerenciador-cargas'
+]);
+
+function getDocsUrl(app) {
+  if (!DOCS_APPS.has(app.name) || !app.port) return null;
+  return `http://${location.hostname}:${app.port}/docs`;
+}
+
+const DISPLAY_NAMES = {
+  'erp-cini': 'Gestão Portaria',
+};
+function displayName(name) { return DISPLAY_NAMES[name] || name; }
+const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+function toast(msg, type='ok') {
+  const el = Object.assign(document.createElement('div'), {className:`toast toast-${type}`, textContent:msg});
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(()=>el.remove(), 4500);
+}
+
+async function api(method, url, body) {
+  const r = await fetch(url, {method, headers:{'Content-Type':'application/json'}, body: body ? JSON.stringify(body) : undefined});
+  const ct = (r.headers.get('content-type') || '').toLowerCase();
+  const raw = await r.text();
+  let j = null;
+
+  if (raw) {
+    try { j = JSON.parse(raw); } catch {}
+  }
+
+  if (!r.ok) {
+    if (j && j.error) throw new Error(j.error);
+    const short = (raw || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+    throw new Error(`HTTP ${r.status} em ${url}${short ? `: ${short}` : ''}`);
+  }
+
+  if (j) return j;
+  if (ct.includes('application/json')) {
+    throw new Error(`Resposta JSON inválida em ${url}`);
+  }
+  throw new Error(`Resposta não-JSON em ${url}`);
+}
+
+function fmtUptime(ms) {
+  if (!ms) return '-';
+  const d = Date.now() - ms;
+  const h = Math.floor(d/3600000), m = Math.floor((d%3600000)/60000);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+async function loadApps() {
+  try {
+    apps = await api('GET', '/api/apps');
+    renderGrid();
+    renderHeader();
+  } catch {}
+}
+
+function renderHeader() {
+  const on  = apps.filter(a=>a.status==='online').length;
+  const off = apps.length - on;
+  document.getElementById('bdg-on').textContent  = `${on} online`;
+  const bdgOff = document.getElementById('bdg-off');
+  if (off > 0) { bdgOff.style.display=''; bdgOff.textContent=`${off} offline`; }
+  else bdgOff.style.display='none';
+}
+
+function dotClass(a) {
+  if (a.deploying) return 'dot dot-yellow';
+  if (a.status==='online') return 'dot dot-green';
+  if (a.status==='stopped'||a.status==='stopping') return 'dot dot-gray';
+  return 'dot dot-red';
+}
+
+function cardClass(a) {
+  if (a.deploying)  return 'card deploying';
+  if (a.status==='online') return 'card online';
+  if (a.status==='stopped'||a.status==='stopping') return 'card stopped';
+  return 'card errored';
+}
+
+function renderGrid() {
+  const g = document.getElementById('grid');
+  if (!apps.length) { g.innerHTML='<div class="empty">Nenhum app encontrado.</div>'; return; }
+  g.innerHTML = apps.map(a => {
+    const cpuColor = a.cpu>80 ? 'var(--red)' : a.cpu>50 ? 'var(--yellow)' : 'var(--text)';
+    const memColor = a.memory>400 ? 'var(--red)' : a.memory>200 ? 'var(--yellow)' : 'var(--text)';
+    return `<div class="${cardClass(a)}">
+      <div class="card-header">
+        <span class="${dotClass(a)}"></span>
+        <span class="card-name">${esc(displayName(a.name))}</span>
+        <span class="card-pid">${a.status==='online' ? (a.port ? `:${a.port}` : `pid:${a.pid}`) : a.status}</span>
+      </div>
+      <div class="metrics">
+        <div class="metric"><div class="m-label">CPU</div><div class="m-val" style="color:${cpuColor}">${a.cpu}%</div></div>
+        <div class="metric"><div class="m-label">Mem</div><div class="m-val" style="color:${memColor}">${a.memory}MB</div></div>
+        <div class="metric"><div class="m-label">Uptime</div><div class="m-val">${a.status==='online'?fmtUptime(a.uptime):'-'}</div></div>
+      </div>
+      ${a.restarts>0?`<div class="restart-warn">⚠ ${a.restarts} restart(s)</div>`:''}
+      ${a.lastCommit?`<div class="last-commit" style="cursor:pointer" data-app="${esc(a.name)}" data-hash="${esc(a.lastCommit.hash)}" data-subject="${esc(a.lastCommit.subject||'').replace(/"/g,'&quot;')}" onclick="openDiff(this.dataset.app,this.dataset.hash,this.dataset.subject)" title="Ver diff deste commit"><span class="lc-hash">${esc(a.lastCommit.hash)}</span><span class="lc-subject">${esc(a.lastCommit.subject.length>55?a.lastCommit.subject.slice(0,55)+'…':a.lastCommit.subject)}</span><span class="lc-date">${esc(a.lastCommit.date)}</span></div>`:''}
+      <div class="card-actions">
+        ${a.status==='online'
+          ?`<button class="btn btn-sm btn-red"  onclick="doAction('${a.name}','stop')">⏹ Stop</button>
+            <button class="btn btn-sm"           onclick="doAction('${a.name}','restart')">⟳ Restart</button>`
+          :`<button class="btn btn-sm btn-green" onclick="doAction('${a.name}','start')">▶ Start</button>`}
+        <button class="btn btn-sm" onclick="openLog('${a.name}')">📄 Logs</button>
+        ${a.hasGit?`<button class="btn btn-sm btn-blue" onclick="openGit('${a.name}')">⎇ Git</button>`:''}
+        ${getDocsUrl(a)?`<button class="btn btn-sm btn-blue" onclick="window.open('${getDocsUrl(a)}','_blank')">📖 API</button>`:''}
+        <button class="btn btn-sm" onclick="openReadme('${a.name}')">📝 Docs</button>
+        <button class="btn btn-sm btn-orange" onclick="doDeploy('${a.name}')" ${a.deploying?'disabled':''}>
+          ${a.deploying?'<span class="spin"></span>Deploy...':'🚀 Deploy'}
+        </button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function doAction(name, action) {
+  try {
+    await api('POST', `/api/apps/${name}/${action}`);
+    toast(`${displayName(name)}: ${action} OK`);
+    setTimeout(loadApps, 1200);
+  } catch(e) { toast(`${displayName(name)}: ${e.message}`, 'err'); }
+}
+
+async function actionAll(action) {
+  const labels = {stop:'Parar',restart:'Reiniciar'};
+  if (!confirm(`${labels[action]||action} TODOS os apps?`)) return;
+  try {
+    await api('POST', `/api/all/${action}`);
+    toast(`${action} all enviado`);
+    setTimeout(loadApps, 1500);
+  } catch(e) { toast(e.message,'err'); }
+}
+
+async function doDeploy(name) {
+  document.getElementById('deploy-title').textContent = `🚀 Deploy — ${displayName(name)}`;
+  document.getElementById('deploy-body').innerHTML = '<span class="spin"></span> Verificando status do git...';
+  document.getElementById('deploy-footer').innerHTML = '';
+  document.getElementById('deploy-modal').classList.add('open');
+
+  try {
+    const check = await api('GET', `/api/apps/${name}/deploy-check`);
+    renderDeployCheck(name, check);
+  } catch (e) {
+    document.getElementById('deploy-body').innerHTML = `<span style="color:var(--red)">Erro: ${esc(e.message)}</span>`;
+    document.getElementById('deploy-footer').innerHTML = `
+      <button class="btn btn-orange" onclick="confirmDeploy('${name}')">🚀 Deploy mesmo assim</button>
+      <button class="btn" onclick="closeDeployModal()">Cancelar</button>`;
+  }
+}
+
+function renderDeployCheck(name, check) {
+  if (!check.hasGit) {
+    document.getElementById('deploy-body').innerHTML = `
+      <div style="margin-bottom:12px">
+        <span class="mode-badge mode-uptodate">Sem Git</span>
+      </div>
+      <p style="color:var(--muted);font-size:12px">Este projeto não possui repositório git. O deploy vai apenas reiniciar o processo.</p>
+      <div class="deploy-flow">
+        <div class="deploy-step"><span class="deploy-step-num">1</span> Instalar dependências (se houver)</div>
+        <div class="deploy-step"><span class="deploy-step-num">2</span> pm2 restart</div>
+        <div class="deploy-step"><span class="deploy-step-num">3</span> Verificar se ficou online</div>
+      </div>`;
+    document.getElementById('deploy-footer').innerHTML = `
+      <button class="btn btn-orange" onclick="confirmDeploy('${name}')">🚀 Fazer Deploy</button>
+      <button class="btn" onclick="closeDeployModal()">Cancelar</button>`;
+    return;
+  }
+
+  if (check.mode === 'local-changes') {
+    let changesHtml = '';
+    if (check.localChanges.length > 0) {
+      changesHtml += `<div class="section-title" style="margin-top:12px">Arquivos modificados localmente (${check.localChanges.length})</div>
+        <div class="change-list">${check.localChanges.map(c => {
+          const code = c.substring(0, 2).trim();
+          const file = c.substring(3);
+          const cls = code === 'M' || code === 'MM' ? 'change-type-m' : code === 'A' || code === '??' ? 'change-type-a' : code === 'D' ? 'change-type-d' : 'change-type-u';
+          const label = code === '??' ? 'N' : code.charAt(0);
+          return `<div class="change-item"><span class="change-type ${cls}">${esc(label)}</span><span>${esc(file)}</span></div>`;
+        }).join('')}</div>`;
+    }
+    if (check.unpushedCommits.length > 0) {
+      changesHtml += `<div class="section-title" style="margin-top:12px">Commits não publicados (${check.unpushedCommits.length})</div>
+        <div class="change-list">${check.unpushedCommits.map(c =>
+          `<div class="change-item"><span class="change-type change-type-m">${esc(c.hash)}</span><span>${esc(c.subject)}</span></div>`
+        ).join('')}</div>`;
+    }
+
+    document.getElementById('deploy-body').innerHTML = `
+      <div style="margin-bottom:8px">
+        <span class="mode-badge mode-local">⚠ Alterações Locais</span>
+        <span style="color:var(--muted);font-size:11px;margin-left:8px">branch: ${esc(check.branch)}</span>
+      </div>
+      <p style="color:var(--muted);font-size:12px;margin-bottom:6px">
+        Existem alterações locais que ainda não foram publicadas no git.<br>
+        O deploy vai <strong style="color:var(--text)">testar primeiro</strong>, e só commitar/publicar se o app funcionar.
+      </p>
+      ${changesHtml}
+      <div class="section-title" style="margin-top:14px">Fluxo do Deploy</div>
+      <div class="deploy-flow">
+        <div class="deploy-step"><span class="deploy-step-num">1</span> Instalar dependências</div>
+        <div class="deploy-step"><span class="deploy-step-num">2</span> 🧪 Testar (restart + verificar se fica online)</div>
+        <div class="deploy-step"><span class="deploy-step-num">3</span> ✅ Se OK → git add + commit + push</div>
+        <div class="deploy-step"><span class="deploy-step-num">4</span> Deploy concluído</div>
+      </div>`;
+    document.getElementById('deploy-footer').innerHTML = `
+      <button class="btn btn-orange" onclick="confirmDeploy('${name}')">🚀 Testar e Publicar</button>
+      <button class="btn" onclick="closeDeployModal()">Cancelar</button>`;
+
+  } else if (check.mode === 'remote-updates') {
+    document.getElementById('deploy-body').innerHTML = `
+      <div style="margin-bottom:8px">
+        <span class="mode-badge mode-remote">⬇ Atualizações Remotas</span>
+        <span style="color:var(--muted);font-size:11px;margin-left:8px">branch: ${esc(check.branch)}</span>
+      </div>
+      <p style="color:var(--muted);font-size:12px;margin-bottom:6px">
+        Existem ${check.remotePending.length} commit(s) no remoto que ainda não foram baixados.
+      </p>
+      <div class="change-list">${check.remotePending.map(c =>
+        `<div class="change-item"><span class="change-type change-type-m">${esc(c.hash)}</span><span>${esc(c.subject)}</span></div>`
+      ).join('')}</div>
+      <div class="section-title" style="margin-top:14px">Fluxo do Deploy</div>
+      <div class="deploy-flow">
+        <div class="deploy-step"><span class="deploy-step-num">1</span> git pull (baixar atualizações)</div>
+        <div class="deploy-step"><span class="deploy-step-num">2</span> Instalar dependências</div>
+        <div class="deploy-step"><span class="deploy-step-num">3</span> 🧪 Testar (restart + verificar se fica online)</div>
+        <div class="deploy-step"><span class="deploy-step-num">4</span> ✅ Se OK → deploy concluído</div>
+        <div class="deploy-step"><span class="deploy-step-num">⚠</span> ❌ Se falhou → rollback automático para o commit anterior</div>
+      </div>`;
+    document.getElementById('deploy-footer').innerHTML = `
+      <button class="btn btn-orange" onclick="confirmDeploy('${name}')">🚀 Atualizar e Reiniciar</button>
+      <button class="btn" onclick="closeDeployModal()">Cancelar</button>`;
+
+  } else {
+    document.getElementById('deploy-body').innerHTML = `
+      <div style="margin-bottom:8px">
+        <span class="mode-badge mode-uptodate">✓ Tudo Atualizado</span>
+        <span style="color:var(--muted);font-size:11px;margin-left:8px">branch: ${esc(check.branch)}</span>
+      </div>
+      <p style="color:var(--muted);font-size:12px;margin-bottom:6px">
+        O código local está em dia com o remoto. O deploy vai apenas reiniciar o processo.
+      </p>
+      <div class="deploy-flow">
+        <div class="deploy-step"><span class="deploy-step-num">1</span> git pull (confirmar)</div>
+        <div class="deploy-step"><span class="deploy-step-num">2</span> Instalar dependências (se houver)</div>
+        <div class="deploy-step"><span class="deploy-step-num">3</span> pm2 restart</div>
+        <div class="deploy-step"><span class="deploy-step-num">4</span> Verificar se ficou online</div>
+      </div>`;
+    document.getElementById('deploy-footer').innerHTML = `
+      <button class="btn btn-orange" onclick="confirmDeploy('${name}')">🚀 Reiniciar</button>
+      <button class="btn" onclick="closeDeployModal()">Cancelar</button>`;
+  }
+}
+
+async function confirmDeploy(name) {
+  closeDeployModal();
+  openLog(name);
+  try {
+    const r = await api('POST', `/api/deploy/${name}`);
+    toast(`Deploy ${displayName(name)}: ${r.status==='ok'?'✅ OK':'❌ ERRO'}`, r.status==='ok'?'ok':'err');
+  } catch(e) { toast(`Deploy ${displayName(name)}: ${e.message}`, 'err'); }
+  await loadApps();
+}
+
+function closeDeployModal() { document.getElementById('deploy-modal').classList.remove('open'); }
+document.getElementById('deploy-modal').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeDeployModal(); });
+
+async function doDeployAll() {
+  if (!confirm('🚀 Deploy em TODOS os apps?\n(log-watcher e cini-dashboard são excluídos)\n\nIsso pode demorar alguns minutos.')) return;
+  try {
+    const r = await api('POST', '/api/deploy-all');
+    toast(`Deploy all iniciado: ${r.apps.join(', ')}`);
+    if (r.apps.length) openLog(r.apps[0]);
+    let n = 0;
+    const t = setInterval(async()=>{ await loadApps(); if(++n>40) clearInterval(t); }, 3000);
+  } catch(e) { toast(e.message,'err'); }
+}
+
+function appendLine(source, text, time) {
+  const body = document.getElementById('log-body');
+  const d = document.createElement('div');
+  d.className = `ll ll-${source}`;
+  const t = time ? new Date(time).toLocaleTimeString('pt-BR') : '';
+  d.innerHTML = `${t ? `<span class="ll-time">${t}</span>` : ''}${esc(text)}`;
+  body.appendChild(d);
+  while (body.children.length > 2000) body.removeChild(body.firstChild);
+  if (autoScroll) body.scrollTop = body.scrollHeight;
+}
+
+function appendSeparator(label) {
+  const body = document.getElementById('log-body');
+  const d = document.createElement('div');
+  d.style.cssText = 'color:#58a6ff;font-weight:700;margin:8px 0 3px;border-top:1px solid #30363d;padding-top:6px';
+  d.textContent = `── ${label} ──`;
+  body.appendChild(d);
+  if (autoScroll) body.scrollTop = body.scrollHeight;
+}
+
+async function openLog(name) {
+  document.getElementById('log-panel').classList.add('open');
+  document.getElementById('log-title').textContent = `📄 ${displayName(name)}  `;
+  document.getElementById('log-body').innerHTML = '<div style="color:#8b949e;padding:4px 0" data-loading>Carregando histórico...</div>';
+  if (sse) { sse.close(); sse = null; }
+  sseLogName = name;
+
+  api('GET', `/api/apps/${name}/logfiles?lines=1200`).then(files => {
+    const body = document.getElementById('log-body');
+    const loading = body.querySelector('[data-loading]');
+    if (files.length > 0) {
+      if (loading) loading.remove();
+
+      const frag = document.createDocumentFragment();
+      for (const f of files) {
+        const sep = document.createElement('div');
+        sep.style.cssText = 'color:#58a6ff;font-weight:700;margin:8px 0 3px;border-top:1px solid #30363d;padding-top:6px';
+        sep.textContent = `── ${f.file} ──`;
+        frag.appendChild(sep);
+        for (const line of f.lines) {
+          const d = document.createElement('div');
+          d.className = `ll ll-${f.source || 'stdout'}`;
+          d.textContent = line;
+          frag.appendChild(d);
+        }
+      }
+      const marker = document.createElement('div');
+      marker.style.cssText = 'color:#3fb950;font-weight:700;margin:8px 0 3px;border-top:1px solid #30363d;padding-top:6px';
+      marker.textContent = '── tempo real ──';
+      frag.appendChild(marker);
+      body.appendChild(frag);
+    } else {
+      if (loading) loading.textContent = '(nenhum arquivo de log encontrado)';
+    }
+    if (autoScroll) body.scrollTop = body.scrollHeight;
+    if (sseLogName === name) connectLogSSE(name);
+  }).catch((e) => {
+    const body = document.getElementById('log-body');
+    const loading = body.querySelector('[data-loading]');
+    if (loading) loading.textContent = `Erro ao carregar histórico: ${e.message || 'falha desconhecida'}`;
+    if (sseLogName === name) connectLogSSE(name);
+  });
+}
+
+function connectLogSSE(name) {
+  if (sse) { sse.close(); sse = null; }
+  sse = new EventSource(`/api/apps/${name}/logs`);
+  sse.onmessage = e => {
+    const {time, source, text} = JSON.parse(e.data);
+    appendLine(source, text, time);
+  };
+  sse.onerror = () => {
+    if (sse) { sse.close(); sse = null; }
+    if (document.getElementById('log-panel').classList.contains('open') && sseLogName === name) {
+      setTimeout(() => connectLogSSE(name), 2000);
+    }
+  };
+}
+
+function closeLog() {
+  const panel = document.getElementById('log-panel');
+  panel.classList.remove('open');
+  panel.style.height = '';
+  sseLogName = null;
+  if (sse) { sse.close(); sse=null; }
+}
+
+function clearLog() { document.getElementById('log-body').innerHTML=''; }
+
+function toggleScroll() {
+  autoScroll = !autoScroll;
+  document.getElementById('btn-ascroll').textContent = autoScroll ? '⇩ Auto-scroll' : '⇩ Manual';
+}
+
+async function openGit(name) {
+  currentGit = name;
+  document.getElementById('git-title').textContent = `⎇ Git — ${displayName(name)}`;
+  document.getElementById('git-body').innerHTML = '<span class="spin"></span> Carregando...';
+  document.getElementById('git-footer').innerHTML = '';
+  document.getElementById('git-modal').classList.add('open');
+  try {
+    const info = await api('GET', `/api/apps/${name}/git`);
+    renderGit(name, info);
+  } catch(e) {
+    document.getElementById('git-body').innerHTML = `<span style="color:var(--red)">${esc(e.message)}</span>`;
+  }
+}
+
+function renderGit(name, info) {
+  if (!info.hasGit) {
+    document.getElementById('git-body').innerHTML = '<div class="empty">Sem repositório git.</div>';
+    document.getElementById('git-footer').innerHTML =
+      `<button class="btn btn-orange" onclick="doDeploy('${name}');closeGit()">🚀 Deploy</button>
+       <button class="btn" onclick="closeGit()">Fechar</button>`;
+    return;
+  }
+
+  const pendingBlock = info.pending.length
+    ? `<div style="margin-bottom:8px"><span class="badge-pending">⬆ ${info.pending.length} commit(s) disponível(is) no remoto</span></div>
+       <table class="commit-tbl">${info.pending.map(c=>`
+         <tr class="tr-pending">
+           <td class="c-hash"><span class="c-hash-link" data-name="${esc(name)}" data-hash="${esc(c.hash)}" data-subject="${esc(c.subject||'').replace(/"/g,'&quot;')}" onclick="openDiff(this.dataset.name,this.dataset.hash,this.dataset.subject)">${esc(c.hash)}</span></td>
+           <td class="c-msg">${esc(c.subject)}</td>
+           <td class="c-meta">${esc(c.date)} · ${esc(c.author)}</td>
+         </tr>`).join('')}</table>`
+    : `<span style="color:var(--green);font-size:12px">✓ Código em dia com o remoto.</span>`;
+
+  const recentBlock = `<table class="commit-tbl">${info.recent.map(c=>`
+    <tr>
+      <td class="c-hash"><span class="c-hash-link" data-name="${esc(name)}" data-hash="${esc(c.hash)}" data-subject="${esc(c.subject||'').replace(/"/g,'&quot;')}" onclick="openDiff(this.dataset.name,this.dataset.hash,this.dataset.subject)">${esc(c.hash)}</span></td>
+      <td class="c-msg">${esc(c.subject)}</td>
+      <td class="c-meta">${esc(c.date)} · ${esc(c.author)}</td>
+    </tr>`).join('')}</table>`;
+
+  document.getElementById('git-body').innerHTML = `
+    <div class="section">
+      <div class="section-title">Status</div>
+      <div class="info-row"><span class="info-lbl">Branch</span><span class="info-val" style="color:var(--blue)">⎇ ${esc(info.branch)}</span></div>
+      <div class="info-row"><span class="info-lbl">Commit atual</span><span class="info-val"><span style="color:var(--blue)">${esc(info.hash)}</span> — ${esc(info.subject)}</span></div>
+      <div class="info-row"><span class="info-lbl">Quando</span><span class="info-val" style="color:var(--muted)">${esc(info.date)} · ${esc(info.author)}</span></div>
+    </div>
+    <div class="section">
+      <div class="section-title">Atualizações disponíveis no remoto</div>
+      ${pendingBlock}
+    </div>
+    <div class="section">
+      <div class="section-title">Últimos 10 commits</div>
+      ${recentBlock}
+    </div>`;
+
+  document.getElementById('git-footer').innerHTML = `
+    <button class="btn btn-blue" onclick="doPull('${name}',this)">⬇ Git Pull</button>
+    <button class="btn btn-orange" onclick="closeGit();doDeploy('${name}')">🚀 Deploy Completo</button>
+    <button class="btn" onclick="closeGit()">Fechar</button>`;
+}
+
+async function doPull(name, btn) {
+  btn.disabled=true; btn.textContent='⬇ Puxando...';
+  try {
+    const r = await api('POST', `/api/apps/${name}/pull`);
+    toast(`git pull OK — ${r.output||'sem mudanças'}`);
+    await openGit(name); 
+  } catch(e) { toast(e.message,'err'); btn.disabled=false; btn.textContent='⬇ Git Pull'; }
+}
+
+function closeGit() { document.getElementById('git-modal').classList.remove('open'); }
+document.getElementById('git-modal').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeGit(); });
+
+async function openDiff(name, hash, subject) {
+  document.getElementById('diff-title').textContent = `📄 ${esc(hash)} — ${esc(subject||'')}`;
+  document.getElementById('diff-body').innerHTML = '<span class="spin"></span> Carregando diff...';
+  document.getElementById('diff-modal').classList.add('open');
+  try {
+    const data = await api('GET', `/api/apps/${name}/commit-diff?hash=${encodeURIComponent(hash)}`);
+    renderDiff(data);
+  } catch(e) {
+    document.getElementById('diff-body').innerHTML = `<span style="color:var(--red)">${esc(e.message)}</span>`;
+  }
+}
+
+function renderDiff(data) {
+  const lines = data.lines || [];
+  let html = '';
+  if (data.stat) html += `<div class="diff-stat">${esc(data.stat)}</div>`;
+
+  let inFile = false;
+  for (const raw of lines) {
+    if (raw.startsWith('diff --git ')) {
+      // extract file path: "diff --git a/foo/bar.php b/foo/bar.php"
+      const m = raw.match(/b\/(.+)$/);
+      const filePath = m ? m[1] : raw.slice(11);
+      html += `<div class="diff-file">📄 ${esc(filePath)}</div>`;
+      inFile = true;
+    } else if (raw.startsWith('@@')) {
+      html += `<span class="diff-hunk">${esc(raw)}</span>`;
+    } else if (raw.startsWith('+') && !raw.startsWith('+++')) {
+      html += `<span class="diff-add">${esc(raw)}</span>`;
+    } else if (raw.startsWith('-') && !raw.startsWith('---')) {
+      html += `<span class="diff-del">${esc(raw)}</span>`;
+    } else if (inFile && (raw.startsWith(' ') || raw === '')) {
+      html += `<span class="diff-ctx">${esc(raw)}</span>`;
+    }
+    // skip index/--- /+++ header lines
+  }
+  if (!html) html = '<div class="empty">Nenhum diff disponível.</div>';
+  document.getElementById('diff-body').innerHTML = `<div class="diff-wrap">${html}</div>`;
+}
+
+function closeDiff() { document.getElementById('diff-modal').classList.remove('open'); }
+document.getElementById('diff-modal').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeDiff(); });
+function simpleMarkdown(md) {
+  let html = esc(md);
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => `<pre><code>${code}</code></pre>`);
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+  html = html.replace(/^---+$/gm, '<hr>');
+  html = html.replace(/^\|(.+)\|$/gm, (m) => {
+    const cells = m.split('|').filter(Boolean).map(c => c.trim());
+    if (cells.every(c => /^[-:]+$/.test(c))) return '<!--tbl-sep-->';
+    return '<tr>' + cells.map(c => `<td>${c}</td>`).join('') + '</tr>';
+  });
+  html = html.replace(/((?:<tr>.*<\/tr>\n?)+)/g, (m) => {
+    let t = m.replace('<!--tbl-sep-->\n', '').replace('<!--tbl-sep-->', '');
+    t = t.replace(/<tr>(.*?)<\/tr>/, (row) => row.replace(/<td>/g, '<th>').replace(/<\/td>/g, '</th>'));
+    return `<table>${t}</table>`;
+  });
+  html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+  html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>');
+  html = html.replace(/\n\n+/g, '</p><p>');
+  html = '<p>' + html + '</p>';
+  html = html.replace(/<p>([\s\S]*?)<\/p>/g, (_, inner) => {
+    if (inner.trim().startsWith('<h') || inner.trim().startsWith('<ul') || inner.trim().startsWith('<table') || inner.trim().startsWith('<pre') || inner.trim().startsWith('<blockquote') || inner.trim().startsWith('<hr')) return inner;
+    return `<p>${inner.replace(/\n/g, '<br>')}</p>`;
+  });
+  html = html.replace(/<p>\s*<\/p>/g, '');
+  return html;
+}
+
+async function openReadme(name) {
+  document.getElementById('readme-title').textContent = `📝 Documentação — ${displayName(name)}`;
+  document.getElementById('readme-body').innerHTML = '<span class="spin"></span> Carregando documentação...';
+  document.getElementById('readme-modal').classList.add('open');
+  try {
+    const data = await api('GET', `/api/apps/${name}/readme`);
+    document.getElementById('readme-body').innerHTML = simpleMarkdown(data.content);
+  } catch (e) {
+    document.getElementById('readme-body').innerHTML = `<div class="empty" style="padding:30px">
+      <div style="font-size:32px;margin-bottom:12px">📄</div>
+      <div style="color:var(--muted)">Nenhuma documentação encontrada para <strong>${esc(name)}</strong>.</div>
+      <div style="color:var(--muted);font-size:11px;margin-top:6px">Crie um arquivo <code>README.md</code> na raiz do projeto.</div>
+    </div>`;
+  }
+}
+
+function closeReadme() { document.getElementById('readme-modal').classList.remove('open'); }
+document.getElementById('readme-modal').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeReadme(); });
+async function openAutoPoll() {
+  document.getElementById('autopoll-body').innerHTML = '<span class="spin"></span> Carregando configuração...';
+  document.getElementById('autopoll-modal').classList.add('open');
+  try {
+    const cfg = await api('GET', '/api/autopoll/config');
+    renderAutoPoll(cfg);
+    startAutoPollRefresh();
+  } catch(e) {
+    document.getElementById('autopoll-body').innerHTML = `<span style="color:var(--red)">Erro: ${esc(e.message)}</span>`;
+  }
+}
+
+function startAutoPollRefresh() {
+  if (autoPollRefreshTimer) return;
+  autoPollRefreshTimer = setInterval(async () => {
+    const modal = document.getElementById('autopoll-modal');
+    if (!modal.classList.contains('open')) return;
+    try {
+      const cfg = await api('GET', '/api/autopoll/config');
+      renderAutoPoll(cfg);
+      if (!cfg.polling) {
+        clearInterval(autoPollRefreshTimer);
+        autoPollRefreshTimer = null;
+      }
+    } catch {}
+  }, 1500);
+}
+
+function stopAutoPollRefresh() {
+  if (!autoPollRefreshTimer) return;
+  clearInterval(autoPollRefreshTimer);
+  autoPollRefreshTimer = null;
+}
+
+function renderAutoPoll(cfg) {
+  const appEntries = Object.entries(cfg.apps);
+  document.getElementById('autopoll-body').innerHTML = `
+    <div class="section">
+      <div class="section-title">Como funciona</div>
+      <p style="color:var(--muted);font-size:12px;margin-bottom:10px">
+        O sistema verifica periodicamente se há commits novos no GitHub.<br>
+        Ao detectar atualização, faz automaticamente:
+        <strong style="color:var(--text)">git pull → instalar dependências → testar → reiniciar</strong>
+        (com rollback automático se falhar).<br>
+        Notificações por WhatsApp a cada detecção e resultado de deploy.
+      </p>
+    </div>
+    <div class="section">
+      <div class="section-title">Configuração</div>
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:12px;margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+          <span style="font-size:12px">Status:</span>
+          <button class="btn btn-sm ${cfg.enabled?'btn-green':'btn-red'}" onclick="toggleAutoPoll()" id="ap-toggle">
+            ${cfg.enabled ? '✅ ATIVO' : '❌ DESATIVADO'}
+          </button>
+          ${cfg.polling ? '<span class="badge badge-muted polling-badge"><span class="spin"></span>Verificando agora...</span>' : ''}
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <span style="font-size:12px;color:var(--muted)">Intervalo:</span>
+          <select id="ap-interval" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-family:inherit;font-size:12px" onchange="changeInterval()">
+            ${[1,2,3,5,10,15,30].map(m => `<option value="${m}" ${cfg.intervalMin===m?'selected':''}>${m} min</option>`).join('')}
+          </select>
+        </div>
+        ${cfg.lastPoll ? `<div style="font-size:11px;color:var(--muted)">Última verificação: ${esc(cfg.lastPoll)}</div>` : ''}
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title">Apps monitorados (${appEntries.length})</div>
+      <table class="commit-tbl">
+        <tr>
+          <th style="color:var(--muted);font-size:10px;padding:6px">APP</th>
+          <th style="color:var(--muted);font-size:10px;padding:6px">BRANCH</th>
+          <th style="color:var(--muted);font-size:10px;padding:6px">COMMIT</th>
+          <th style="color:var(--muted);font-size:10px;padding:6px">AUTO-DEPLOY</th>
+          <th style="color:var(--muted);font-size:10px;padding:6px">AUTH</th>
+        </tr>
+        ${appEntries.map(([name, info]) => `<tr>
+          <td style="padding:6px;font-weight:600">${esc(displayName(name))}</td>
+          <td style="padding:6px"><span style="color:var(--blue)">${esc(info.branch)}</span></td>
+          <td style="padding:6px"><span class="c-hash">${esc(info.hash)}</span></td>
+          <td style="padding:6px">
+            <button class="btn btn-sm ${info.enabled?'btn-green':'btn-red'}" onclick="toggleAppPoll('${name}')">
+              ${info.enabled ? '✅ ON' : '❌ OFF'}
+            </button>
+          </td>
+          <td style="padding:6px">${info.error ? `<span style="color:var(--red);font-size:11px;cursor:help" title="${esc(info.error)}">❌</span>` : '<span style="color:var(--green)">✅</span>'}</td>
+        </tr>`).join('')}
+      </table>
+    </div>`;
+  document.getElementById('autopoll-footer').innerHTML = `
+    <button class="btn btn-blue" onclick="checkNow()">🔍 Verificar agora</button>
+    <button class="btn" onclick="closeAutoPoll()">Fechar</button>`;
+}
+
+async function toggleAutoPoll() {
+  try {
+    const r = await api('POST', '/api/autopoll/toggle');
+    toast(r.enabled ? 'Auto-deploy ATIVADO' : 'Auto-deploy desativado');
+    openAutoPoll();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function changeInterval() {
+  const min = parseInt(document.getElementById('ap-interval').value);
+  try {
+    await api('POST', '/api/autopoll/interval', { minutes: min });
+    toast(`Intervalo alterado para ${min} min`);
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function toggleAppPoll(name) {
+  try {
+    const r = await api('POST', `/api/autopoll/app/${name}/toggle`);
+    toast(`${displayName(name)}: auto-deploy ${r.enabled ? 'ativado' : 'desativado'}`);
+    openAutoPoll();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function checkNow() {
+  try {
+    const r = await api('POST', '/api/autopoll/check-now');
+    toast(r.msg || 'Verificação iniciada...');
+    openAutoPoll();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+function closeAutoPoll() {
+  document.getElementById('autopoll-modal').classList.remove('open');
+  stopAutoPollRefresh();
+}
+document.getElementById('autopoll-modal').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeAutoPoll(); });
+function renderHistory(hist) {
+  const el = document.getElementById('history');
+  if (!hist.length) { el.innerHTML='<div class="empty">Nenhum deploy ainda.</div>'; return; }
+  el.innerHTML = hist.map(h=>`
+    <div class="h-item h-${h.status}">
+      <div class="h-app">${h.status==='ok'?'[OK]':'[ERRO]'} ${esc(displayName(h.app))}</div>
+      <div class="h-detail">${esc(h.detail)}</div>
+      <div class="h-time">${esc(h.time)}</div>
+    </div>`).join('');
+}
+
+function startHistorySSE() {
+  const es = new EventSource('/api/deploy-history/stream');
+  es.onmessage = e => renderHistory(JSON.parse(e.data));
+  es.onerror   = () => setTimeout(startHistorySSE, 5000);
+}
+
+(function(){
+  const handle = document.getElementById('resize-handle');
+  const panel  = document.getElementById('log-panel');
+  let dragging = false, startY = 0, startH = 0;
+
+  handle.addEventListener('mousedown', e => {
+    if (!panel.classList.contains('open')) return;
+    dragging = true; startY = e.clientY; startH = panel.offsetHeight;
+    handle.classList.add('active');
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const newH = Math.max(120, Math.min(window.innerHeight - 100, startH + (startY - e.clientY)));
+    panel.style.height = newH + 'px';
+  });
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    handle.classList.remove('active');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  });
+})();
+
+(async()=>{
+  await loadApps();
+  startHistorySSE();
+  setInterval(loadApps, 5000);
+  setInterval(()=>{
+    document.getElementById('bdg-time').textContent =
+      new Date().toLocaleTimeString('pt-BR');
+  }, 1000);
+})();
+</script>
+</body>
+</html>
