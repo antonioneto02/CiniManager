@@ -38,6 +38,7 @@ body{background:var(--bg);color:var(--text);font-family:'Cascadia Code','Fira Co
 .btn-red{border-color:#2d0f0f;color:var(--red)}.btn-red:hover{background:#2d0f0f}
 .btn-blue{border-color:#0d1f3c;color:var(--blue)}.btn-blue:hover{background:#0d1f3c}
 .btn-orange{border-color:#2d1f00;color:var(--orange)}.btn-orange:hover{background:#2d1f00}
+.btn-yellow{border-color:#332600;color:var(--yellow)}.btn-yellow:hover{background:#332600}
 .btn-sm{padding:3px 8px;font-size:11px}
 .cards-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;border-left:3px solid var(--border);position:relative}
@@ -168,6 +169,7 @@ body{background:var(--bg);color:var(--text);font-family:'Cascadia Code','Fira Co
     <span class="badge badge-muted">↕ Arraste os cards para ordenar</span>
     <div class="topbar-right">
       <button class="btn btn-sm btn-blue" onclick="openAutoPoll()" id="btn-autopoll">🔄 Auto-deploy</button>
+      <button class="btn btn-sm btn-yellow" onclick="openRestartResetModal()">🧹 Limpar restarts</button>
       <button class="btn btn-sm btn-orange" onclick="doDeployAll()">🚀 Deploy All</button>
       <button class="btn btn-sm btn-red"    onclick="actionAll('stop')">⏹ Stop All</button>
     </div>
@@ -250,6 +252,17 @@ body{background:var(--bg);color:var(--text);font-family:'Cascadia Code','Fira Co
       <button class="btn btn-sm" onclick="closeDiff()">✕</button>
     </div>
     <div class="modal-body" id="diff-body" style="padding:12px 16px"><span class="spin"></span> Carregando diff...</div>
+  </div>
+</div>
+
+<div class="modal-bg" id="restart-reset-modal">
+  <div class="modal" style="width:560px;max-width:94vw">
+    <div class="modal-head">
+      <span class="modal-head-title">🧹 Limpar Contador de Restarts</span>
+      <button class="btn btn-sm" onclick="closeRestartResetModal()">✕</button>
+    </div>
+    <div class="modal-body" id="restart-reset-body"></div>
+    <div class="modal-footer" id="restart-reset-footer"></div>
   </div>
 </div>
 
@@ -476,6 +489,50 @@ async function actionAll(action) {
     toast(`${action} all enviado`);
     setTimeout(loadApps, 1500);
   } catch(e) { toast(e.message,'err'); }
+}
+
+function openRestartResetModal() {
+  const options = apps
+    .slice()
+    .sort((a, b) => displayName(a.name).localeCompare(displayName(b.name), 'pt-BR'))
+    .map(a => `<option value="${esc(a.name)}">${esc(displayName(a.name))} (${esc(a.name)})</option>`)
+    .join('');
+
+  document.getElementById('restart-reset-body').innerHTML = `
+    <div class="section" style="margin-bottom:8px">
+      <div class="section-title">Escolha a aplicação</div>
+      <p style="color:var(--muted);font-size:12px;margin-bottom:10px">
+        Isso zera o contador de restarts da aplicação selecionada no PM2.
+      </p>
+      <select id="restart-reset-app" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-family:inherit;font-size:12px">
+        ${options || '<option disabled selected>Nenhuma aplicação disponível</option>'}
+      </select>
+    </div>`;
+
+  document.getElementById('restart-reset-footer').innerHTML = `
+    <button class="btn btn-yellow" onclick="confirmRestartReset()" ${options ? '' : 'disabled'}>🧹 Limpar</button>
+    <button class="btn" onclick="closeRestartResetModal()">Cancelar</button>`;
+
+  document.getElementById('restart-reset-modal').classList.add('open');
+}
+
+function closeRestartResetModal() {
+  document.getElementById('restart-reset-modal').classList.remove('open');
+}
+
+async function confirmRestartReset() {
+  const sel = document.getElementById('restart-reset-app');
+  const name = sel?.value;
+  if (!name) return;
+
+  try {
+    await api('POST', `/api/apps/${name}/reset-restarts`);
+    toast(`${displayName(name)}: contador de restarts zerado`);
+    closeRestartResetModal();
+    await loadApps();
+  } catch (e) {
+    toast(`${displayName(name)}: ${e.message}`, 'err');
+  }
 }
 
 async function doDeploy(name) {
@@ -832,6 +889,7 @@ function renderDiff(data) {
 
 function closeDiff() { document.getElementById('diff-modal').classList.remove('open'); }
 document.getElementById('diff-modal').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeDiff(); });
+document.getElementById('restart-reset-modal').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeRestartResetModal(); });
 function simpleMarkdown(md) {
   let html = esc(md);
   html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => `<pre><code>${code}</code></pre>`);
