@@ -38,6 +38,16 @@ const APP_REGISTRY = {
 const DEPLOY_EXCLUDE    = new Set(['log-watcher']);
 const STAGED_DEPLOY_APPS = new Set(['cini-dashboard']); 
 const AUTOPOLL_FILE = path.join(__dirname, '.autopoll.json');
+const CARD_ORDER_FILE = path.join(__dirname, '.card-order.json');
+const DISPLAY_NAMES = {
+  'erp-cini': 'Gestão Portaria',
+  'cini-dashboard': 'Cini Manager',
+};
+
+function appLabel(name) {
+  return DISPLAY_NAMES[name] || name;
+}
+
 function loadAutoPoll() {
   try {
     if (fs.existsSync(AUTOPOLL_FILE))
@@ -45,10 +55,27 @@ function loadAutoPoll() {
   } catch {}
   return { enabled: true, intervalMin: 2, apps: {} };
 }
+
+function loadCardOrder() {
+  try {
+    if (fs.existsSync(CARD_ORDER_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(CARD_ORDER_FILE, 'utf8'));
+      if (Array.isArray(parsed.apps)) return parsed.apps;
+    }
+  } catch {}
+  return [];
+}
+
 function saveAutoPoll() {
   try { fs.writeFileSync(AUTOPOLL_FILE, JSON.stringify(autoPollCfg, null, 2), 'utf8'); } catch {}
 }
+
+function saveCardOrder() {
+  try { fs.writeFileSync(CARD_ORDER_FILE, JSON.stringify({ apps: cardOrder }, null, 2), 'utf8'); } catch {}
+}
+
 let autoPollCfg = loadAutoPoll();
+let cardOrder = loadCardOrder();
 
 const WPP_DEST = '554188529918';
 const DB_CFG   = {
@@ -83,6 +110,141 @@ async function sendWhatsApp(msg) {
   }
 }
 
+function trimText(text, max = 500) {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim();
+  return clean.length > max ? clean.slice(0, max - 1) + '…' : clean;
+}
+
+async function notifyWhatsApp(title, lines = []) {
+  const body = lines.filter(Boolean).join('\n');
+  const msg = `${title}\n📅 ${now()}\n${'━'.repeat(25)}\n\n${body}`;
+  await sendWhatsApp(msg);
+}
+
+const runtimeAlerts = new Map();
+const logAlertThrottle = new Map();
+const gitAlertThrottle = new Map();
+const LOG_ALERT_WINDOW_MS = 10 * 60 * 1000;
+const ALERT_VISIBLE_MS = 6 * 60 * 60 * 1000;
+const LOG_ERROR_PATTERNS = [
+  /(^|\b)(error|exception|fatal|traceback|unhandled|failed|failure|critical|panic)(\b|:)/i,
+  /ECONN|EADDR|ENOENT|ETIMEDOUT|REFUSED|timeout/i,
+  /cannot\s|invalid\s|not found|denied|unauthorized|forbidden/i,
+  /\bHTTP\/1\.[01]"\s[45]\d\d\b/i,
+  /\bstatus\s*[=:]\s*[45]\d\d\b/i,
+  /\b(?:sql|database|db)\b.*\b(error|failed|exception|timeout)\b/i,
+];
+const LOG_ERROR_IGNORE_PATTERNS = [
+  /0 errors?/i,
+  /without errors?/i,
+  /deprecationwarning/i,
+  /source map error/i,
+  /\bINFO\b/i,
+  /\bDEBUG\b/i,
+  /\bHTTP\/1\.[01]"\s2\d\d\b/i,
+  /Starting new HTTP connection/i,
+  /Starting new HTTPS connection/i,
+  /chamado com sucesso/i,
+  /conclu[ií]d[ao] com sucesso/i,
+  /registrad[ao] com sucesso/i,
+  /dados recebidos da api/i,
+  /processando /i,
+  /aguardando \d+s/i,
+  /pagina(?:ç|c)[aã]o/i,
+];
+
+function rememberRuntimeAlert(appName, type, reason) {
+  runtimeAlerts.set(appName, { type, reason: trimText(reason, 220), ts: Date.now() });
+}
+
+function getRuntimeAlert(appName) {
+  const alert = runtimeAlerts.get(appName);
+  if (!alert) return null;
+  if (Date.now() - alert.ts > ALERT_VISIBLE_MS) {
+    runtimeAlerts.delete(appName);
+    return null;
+  }
+  return alert;
+}
+
+function normalizeErrorSignature(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[0-9a-f]{7,}/g, '#')
+    .replace(/\d+/g, '#')
+    .replace(/https?:\/\/\S+/g, 'url')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 180);
+}
+
+function isPotentialErrorLine(source, text) {
+  const content = String(text || '').trim();
+  if (!content) return false;
+  if (source === 'deploy') return false;
+  if (/\b(?:INFO|DEBUG)\b/.test(content) && !LOG_ERROR_PATTERNS.some(rx => rx.test(content))) return false;
+  if (LOG_ERROR_IGNORE_PATTERNS.some(rx => rx.test(content))) return false;
+  return LOG_ERROR_PATTERNS.some(rx => rx.test(content));
+}
+
+async function notifyAppLogError(appName, source, text) {
+  if (!isPotentialErrorLine(source, text)) return;
+
+  const signature = `${appName}:${source}:${normalizeErrorSignature(text)}`;
+  const lastSent = logAlertThrottle.get(signature) || 0;
+  if (Date.now() - lastSent < LOG_ALERT_WINDOW_MS) return;
+  logAlertThrottle.set(signature, Date.now());
+
+  rememberRuntimeAlert(appName, 'runtime', text);
+  const recent = (logBuffers[appName] || []).slice(-6).map(entry => `${entry.source}: ${trimText(entry.text, 180)}`);
+  await notifyWhatsApp(`🔴 Erro da aplicação — ${appLabel(appName)}`, [
+    `📱 App: ${appName}`,
+    `📌 Origem: ${source}`,
+    `⚠️ Linha: ${trimText(text, 260)}`,
+    recent.length ? '' : null,
+    recent.length ? '📄 Últimas linhas:' : null,
+    recent.length ? recent.join('\n') : null,
+  ]);
+}
+
+async function notifyGitPollError(appName, message) {
+  const signature = `${appName}:${normalizeErrorSignature(message)}`;
+  const lastSent = gitAlertThrottle.get(signature) || 0;
+  if (Date.now() - lastSent < LOG_ALERT_WINDOW_MS) return;
+  gitAlertThrottle.set(signature, Date.now());
+  rememberRuntimeAlert(appName, 'git', message);
+  await notifyWhatsApp(`⛔ Falha Git/Polling — ${appLabel(appName)}`, [
+    `📱 App: ${appName}`,
+    `⚠️ Erro: ${trimText(message, 300)}`,
+  ]);
+}
+
+async function notifyPm2EventError(appName, event) {
+  const criticalEvents = new Set(['exit', 'exit overlimit', 'restart overlimit', 'errored']);
+  if (!criticalEvents.has(String(event || '').toLowerCase())) return;
+
+  const signature = `${appName}:pm2-event:${String(event).toLowerCase()}`;
+  const lastSent = logAlertThrottle.get(signature) || 0;
+  if (Date.now() - lastSent < LOG_ALERT_WINDOW_MS) return;
+  logAlertThrottle.set(signature, Date.now());
+
+  rememberRuntimeAlert(appName, 'runtime', `evento PM2: ${event}`);
+  await notifyWhatsApp(`🔴 Evento crítico PM2 — ${appLabel(appName)}`, [
+    `📱 App: ${appName}`,
+    `⚠️ Evento: ${event}`,
+  ]);
+}
+
+function sortAppsByCardOrder(list) {
+  const orderMap = new Map(cardOrder.map((name, index) => [name, index]));
+  return [...list].sort((a, b) => {
+    const ai = orderMap.has(a.name) ? orderMap.get(a.name) : Number.MAX_SAFE_INTEGER;
+    const bi = orderMap.has(b.name) ? orderMap.get(b.name) : Number.MAX_SAFE_INTEGER;
+    if (ai !== bi) return ai - bi;
+    return appLabel(a.name).localeCompare(appLabel(b.name), 'pt-BR');
+  });
+}
+
 function now() {
   return new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 }
@@ -105,6 +267,9 @@ function bufferLog(appName, source, text) {
   (sseClients[appName] || []).forEach(r => {
     try { r.write(`data: ${JSON.stringify(entry)}\n\n`); } catch {}
   });
+  if (appName && text && ['stdout', 'stderr', 'pm2'].includes(source)) {
+    notifyAppLogError(appName, source, text).catch(() => {});
+  }
 }
 
 let _pm2Connected = null;
@@ -139,6 +304,7 @@ function startBus() {
         const event = pkt.event;
         if (!name) return;
         bufferLog(name, 'pm2', `evento PM2: ${event}`);
+        notifyPm2EventError(name, event).catch(() => {});
       });
       bus.on('error', () => { _pm2Connected = null; setTimeout(startBus, 5000); });
     });
@@ -872,6 +1038,7 @@ async function pollGitUpdates() {
       if (fetchOk === null) {
         pollErrors[appName] = 'git fetch falhou (autenticação?)';
         console.error(`[poll] ${appName}: git fetch falhou`);
+        await notifyGitPollError(appName, pollErrors[appName]);
         continue;
       }
       delete pollErrors[appName];
@@ -909,6 +1076,7 @@ async function pollGitUpdates() {
     } catch (e) {
       pollErrors[appName] = e.message;
       console.error(`[poll] Erro ao verificar ${appName}:`, e.message);
+      await notifyGitPollError(appName, e.message);
     }
   }
 
@@ -982,7 +1150,7 @@ app.get('/api/apps', async (req, res) => {
   try {
     const list = await pm2List();
     const HIDE = new Set(['log-watcher']);
-    const filtered = list.filter(p => !p.name.startsWith('pm2-') && !HIDE.has(p.name));
+    const filtered = sortAppsByCardOrder(list.filter(p => !p.name.startsWith('pm2-') && !HIDE.has(p.name)));
     const commits = await Promise.all(filtered.map(p => getLastCommit(p.name).catch(() => null)));
     const lastErrors = new Map();
     for (const item of deployHistory) {
@@ -992,9 +1160,10 @@ app.get('/api/apps', async (req, res) => {
     const data = filtered.map((p, i) => {
       const status = p.pm2_env.status;
       const gitError = pollErrors[p.name] || null;
+      const runtimeError = getRuntimeAlert(p.name)?.reason || null;
       const deployError = status !== 'online' ? (lastErrors.get(p.name)?.detail || null) : null;
-      const attentionReason = gitError || deployError;
-      const attentionType = gitError ? 'git' : (deployError ? 'deploy' : null);
+      const attentionReason = gitError || runtimeError || deployError;
+      const attentionType = gitError ? 'git' : (runtimeError ? 'runtime' : (deployError ? 'deploy' : null));
 
       return {
         id:         p.pm_id,
@@ -1029,6 +1198,11 @@ app.post('/api/apps/:name/:action', async (req, res) => {
       if (deployHistory.length > 30) deployHistory.pop();
       pushHistory();
     }
+    await notifyWhatsApp(`✅ Ação executada — ${appLabel(name)}`, [
+      `📱 App: ${name}`,
+      `🔧 Ação: ${action}`,
+      `📌 Origem: dashboard`,
+    ]);
     res.json({ ok: true });
   } catch (e) {
     const wppMsg = `❌ *Ação falhou* — ${name}\n🔧 ${action}\n📅 ${now()}\n\n⚠️ ${e.message}`;
@@ -1063,11 +1237,22 @@ app.post('/api/apps/reset-restarts', async (req, res) => {
 
   const failed = results.filter(item => !item.ok);
   if (failed.length) {
+    await notifyWhatsApp('⚠️ Limpeza de restarts com falha parcial', [
+      '📌 Origem: dashboard',
+      `✅ Sucesso: ${results.filter(item => item.ok).map(item => appLabel(item.app)).join(', ') || 'nenhum'}`,
+      `❌ Falha: ${failed.map(item => `${appLabel(item.app)} (${trimText(item.error, 120)})`).join(', ')}`,
+    ]);
     return res.status(500).json({
       error: `Falha ao limpar ${failed.length} aplicação(ões)`,
       results,
     });
   }
+
+  await notifyWhatsApp('🧹 Restarts limpos', [
+    '📌 Origem: dashboard',
+    `📱 Apps: ${appNames.map(appLabel).join(', ')}`,
+    `🔢 Quantidade: ${appNames.length}`,
+  ]);
 
   res.json({ ok: true, results });
 });
@@ -1081,6 +1266,11 @@ app.post('/api/all/:action', async (req, res) => {
     deployHistory.unshift({ time: now(), app: 'TODOS', status: 'ok', detail: action });
     if (deployHistory.length > 30) deployHistory.pop();
     pushHistory();
+    await notifyWhatsApp('✅ Ação em lote executada', [
+      '📱 Escopo: todos os apps',
+      `🔧 Ação: ${action}`,
+      '📌 Origem: dashboard',
+    ]);
     res.json({ ok: true });
   } catch (e) {
     const wppMsg = `❌ *Ação falhou* — TODOS\n🔧 ${action}\n📅 ${now()}\n\n⚠️ ${e.message}`;
@@ -1172,14 +1362,45 @@ app.get('/api/apps/:name/readme', (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/apps/:name/pull', (req, res) => {
-  const cwd = APP_REGISTRY[req.params.name];
+app.post('/api/apps/:name/pull', async (req, res) => {
+  const { name } = req.params;
+  const cwd = APP_REGISTRY[name];
   if (!cwd) return res.status(404).json({ error: 'App não encontrado' });
   const gitRoot = findGitRoot(cwd);
   if (!gitRoot) return res.status(400).json({ error: 'Sem repositório git' });
   const out = git('pull', gitRoot);
-  if (out === null) return res.status(500).json({ error: 'git pull falhou' });
+  if (out === null) {
+    await notifyWhatsApp(`❌ Git pull falhou — ${appLabel(name)}`, [
+      `📱 App: ${name}`,
+      '📌 Origem: dashboard',
+      '⚠️ Erro: git pull falhou',
+    ]);
+    return res.status(500).json({ error: 'git pull falhou' });
+  }
+  await notifyWhatsApp(`⬇ Git pull executado — ${appLabel(name)}`, [
+    `📱 App: ${name}`,
+    '📌 Origem: dashboard',
+    `📝 Resultado: ${trimText(out || 'sem mudanças', 250)}`,
+  ]);
   res.json({ ok: true, output: out });
+});
+
+app.post('/api/cards/order', async (req, res) => {
+  const requestedApps = Array.isArray(req.body?.apps) ? req.body.apps : [];
+  const validApps = Object.keys(APP_REGISTRY).filter(name => !DEPLOY_EXCLUDE.has(name));
+  const appNames = [...new Set(requestedApps.filter(name => validApps.includes(name)))];
+  if (!appNames.length) return res.status(400).json({ error: 'Ordem inválida' });
+
+  const missing = validApps.filter(name => !appNames.includes(name));
+  cardOrder = [...appNames, ...missing];
+  saveCardOrder();
+
+  await notifyWhatsApp('↕ Ordem dos cards alterada', [
+    '📌 Origem: dashboard',
+    `📋 Nova ordem: ${cardOrder.map(appLabel).join(' → ')}`,
+  ]);
+
+  res.json({ ok: true, apps: cardOrder });
 });
 
 app.post('/api/deploy/:name', async (req, res) => {
@@ -1195,6 +1416,10 @@ app.post('/api/deploy-all', (req, res) => {
   const names = Object.keys(APP_REGISTRY).filter(n => !DEPLOY_EXCLUDE.has(n));
   res.json({ ok: true, apps: names });
   (async () => {
+    await notifyWhatsApp('🚀 Deploy All iniciado', [
+      '📌 Origem: dashboard',
+      `📱 Apps: ${names.map(appLabel).join(', ')}`,
+    ]);
     for (const name of names) {
       try { await deployApp(name); } catch {}
     }
@@ -1346,6 +1571,10 @@ app.post('/api/autopoll/toggle', (req, res) => {
   autoPollCfg.enabled = !autoPollCfg.enabled;
   saveAutoPoll();
   if (autoPollCfg.enabled) { startPolling(); } else { stopPolling(); }
+  notifyWhatsApp('🔄 Auto-deploy alterado', [
+    '📌 Origem: dashboard',
+    `📡 Status: ${autoPollCfg.enabled ? 'ATIVADO' : 'DESATIVADO'}`,
+  ]).catch(() => {});
   res.json({ ok: true, enabled: autoPollCfg.enabled });
 });
 
@@ -1355,6 +1584,10 @@ app.post('/api/autopoll/interval', (req, res) => {
   autoPollCfg.intervalMin = min;
   saveAutoPoll();
   if (autoPollCfg.enabled) startPolling();
+  notifyWhatsApp('⏱ Intervalo do auto-deploy alterado', [
+    '📌 Origem: dashboard',
+    `🕒 Novo intervalo: ${min} min`,
+  ]).catch(() => {});
   res.json({ ok: true, intervalMin: min });
 });
 
@@ -1364,11 +1597,20 @@ app.post('/api/autopoll/app/:name/toggle', (req, res) => {
   if (!autoPollCfg.apps[name]) autoPollCfg.apps[name] = {};
   autoPollCfg.apps[name].enabled = !(autoPollCfg.apps[name].enabled !== false);
   saveAutoPoll();
+  notifyWhatsApp('🧩 Auto-deploy por aplicação alterado', [
+    '📌 Origem: dashboard',
+    `📱 App: ${name}`,
+    `📡 Status: ${autoPollCfg.apps[name].enabled ? 'ATIVADO' : 'DESATIVADO'}`,
+  ]).catch(() => {});
   res.json({ ok: true, app: name, enabled: autoPollCfg.apps[name].enabled });
 });
 
 app.post('/api/autopoll/check-now', async (req, res) => {
   if (pollingRunning) return res.json({ ok: true, msg: 'Já está verificando...' });
+  notifyWhatsApp('🔍 Verificação manual do auto-deploy', [
+    '📌 Origem: dashboard',
+    '📡 Ação: verificar agora',
+  ]).catch(() => {});
   res.json({ ok: true, msg: 'Verificação iniciada' });
   setImmediate(() => pollGitUpdates());
 });

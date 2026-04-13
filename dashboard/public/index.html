@@ -269,7 +269,6 @@ body{background:var(--bg);color:var(--text);font-family:'Cascadia Code','Fira Co
 <script>
 let apps = [], sse = null, sseLogName = null, autoScroll = true, currentGit = null;
 let autoPollRefreshTimer = null;
-const CARD_ORDER_KEY = 'cini-manager-card-order.v1';
 const DOCS_APPS = new Set([
   'api-weduu','erp-cini','wf-cini','central-tarefas',
   'hub-cini','cini-pricing','api-sicredi','notificador-pix',
@@ -281,6 +280,12 @@ const DOCS_APPS = new Set([
 function getDocsUrl(app) {
   if (!DOCS_APPS.has(app.name) || !app.port) return null;
   return `http://${location.hostname}:${app.port}/docs`;
+}
+
+function getAppUrl(app) {
+  if (!app.port) return null;
+  if (app.name === 'cini-dashboard') return '/';
+  return `http://${location.hostname}:${app.port}`;
 }
 
 const DISPLAY_NAMES = {
@@ -328,35 +333,15 @@ function fmtUptime(ms) {
 
 async function loadApps() {
   try {
-    const loaded = await api('GET', '/api/apps');
-    apps = applySavedOrder(loaded);
+    apps = await api('GET', '/api/apps');
     renderGrid();
     renderHeader();
   } catch {}
 }
 
-function applySavedOrder(list) {
-  let saved = [];
-  try {
-    saved = JSON.parse(localStorage.getItem(CARD_ORDER_KEY) || '[]');
-    if (!Array.isArray(saved)) saved = [];
-  } catch {
-    saved = [];
-  }
-  if (!saved.length) return list;
-
-  const indexMap = new Map(saved.map((name, idx) => [name, idx]));
-  return [...list].sort((a, b) => {
-    const ia = indexMap.has(a.name) ? indexMap.get(a.name) : Number.MAX_SAFE_INTEGER;
-    const ib = indexMap.has(b.name) ? indexMap.get(b.name) : Number.MAX_SAFE_INTEGER;
-    if (ia !== ib) return ia - ib;
-    return displayName(a.name).localeCompare(displayName(b.name), 'pt-BR');
-  });
-}
-
-function saveCurrentOrder() {
+async function saveCurrentOrder() {
   const order = Array.from(document.querySelectorAll('#grid .card[data-app]')).map(el => el.dataset.app);
-  localStorage.setItem(CARD_ORDER_KEY, JSON.stringify(order));
+  await api('POST', '/api/cards/order', { apps: order });
 }
 
 function syncAppsOrderFromDom() {
@@ -394,8 +379,9 @@ function bindCardDnD() {
       dragging.classList.remove('dragging');
       dragging = null;
       syncAppsOrderFromDom();
-      saveCurrentOrder();
-      toast('Ordem dos cards atualizada');
+      saveCurrentOrder()
+        .then(() => toast('Ordem dos cards atualizada'))
+        .catch(err => toast(`Falha ao salvar ordem: ${err.message}`, 'err'));
     });
 
     card.addEventListener('dragend', () => {
@@ -403,7 +389,6 @@ function bindCardDnD() {
       dragging.classList.remove('dragging');
       dragging = null;
       syncAppsOrderFromDom();
-      saveCurrentOrder();
     });
   });
 }
@@ -439,7 +424,7 @@ function renderGrid() {
   g.innerHTML = apps.map(a => {
     const cpuColor = a.cpu>80 ? 'var(--red)' : a.cpu>50 ? 'var(--yellow)' : 'var(--text)';
     const memColor = a.memory>400 ? 'var(--red)' : a.memory>200 ? 'var(--yellow)' : 'var(--text)';
-    const alertLabel = a.attentionType === 'git' ? 'Falha Git' : 'Falha Deploy';
+    const alertLabel = a.attentionType === 'git' ? 'Falha Git' : (a.attentionType === 'runtime' ? 'Erro App' : 'Falha Deploy');
     return `<div class="${cardClass(a)}" data-app="${esc(a.name)}" draggable="true" title="${a.hasAttention ? esc(a.attentionReason || 'Falha de deploy') : ''}">
       <div class="card-header">
         <span class="${dotClass(a)}"></span>
@@ -462,6 +447,7 @@ function renderGrid() {
           :`<button class="btn btn-sm btn-green" onclick="doAction('${a.name}','start')">▶ Start</button>`}
         <button class="btn btn-sm" onclick="openLog('${a.name}')">📄 Logs</button>
         ${a.hasGit?`<button class="btn btn-sm btn-blue" onclick="openGit('${a.name}')">⎇ Git</button>`:''}
+        ${getAppUrl(a)?`<button class="btn btn-sm btn-green" onclick="window.open('${getAppUrl(a)}','_blank')">🌐 App</button>`:''}
         ${getDocsUrl(a)?`<button class="btn btn-sm btn-blue" onclick="window.open('${getDocsUrl(a)}','_blank')">📖 API</button>`:''}
         <button class="btn btn-sm" onclick="openReadme('${a.name}')">📝 Docs</button>
         <button class="btn btn-sm btn-orange" onclick="doDeploy('${a.name}')" ${a.deploying?'disabled':''}>
