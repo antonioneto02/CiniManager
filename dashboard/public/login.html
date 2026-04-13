@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login - Cini Manager</title>
+  <link rel="icon" type="image/png" href="/Cini.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body class="d-flex align-items-center min-vh-100" style="background-image: url('/css/Background.png'); background-size: cover; background-position: center; background-repeat: no-repeat; padding-top: 8vh; font-family: 'Inter', sans-serif;">
+  <div class="container">
+    <div class="row justify-content-center">
+      <div class="col-md-6">
+        <div class="card">
+          <div class="card-header text-center" style="background: linear-gradient(135deg, #2B286F 100%); border: none;">
+            <div class="d-flex align-items-center justify-content-center mb-2">
+              <img src="/Cini.png" alt="Cini" style="height: 40px; margin-right: 15px;">
+              <h2 class="text-white mb-0">Login</h2>
+            </div>
+            <h6 class="text-white mb-0">Utilizar as mesmas credenciais do Protheus.</h6>
+            <div id="logoutAlert" class="alert alert-info mt-2" role="alert" style="display:none;border-left:4px solid #17a2b8;">
+              <div class="d-flex align-items-center">
+                <i class="fas fa-sign-out-alt me-2" style="font-size:1.2em;"></i>
+                <div>
+                  <strong>Logout realizado com sucesso</strong><br>
+                  <small>Você foi desconectado com segurança. Faça login novamente quando desejar.</small>
+                </div>
+              </div>
+            </div>
+            <div id="errorAlert" class="alert alert-danger mt-2" role="alert" style="display:none;border-left:4px solid #dc3545;">
+              <div class="d-flex align-items-center">
+                <i class="fas fa-exclamation-triangle me-2" style="font-size:1.2em;"></i>
+                <div>
+                  <strong>Login falhou!</strong><br>
+                  <small id="errorText">Verifique seu usuário e senha.</small>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="card-body">
+            <form id="loginForm">
+              <div class="form-group mb-3">
+                <label for="username">Usuário:</label>
+                <input type="text" class="form-control" id="username" name="username" required autocomplete="username">
+              </div>
+              <div class="form-group">
+                <label for="password">Senha:</label>
+                <div style="position: relative;">
+                  <input type="password" class="form-control" id="password" name="password" required autocomplete="current-password" style="padding-right: 45px;">
+                  <button class="btn" type="button" id="togglePassword" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);z-index:10;border:none;background:none;padding:0;color:#6c757d;outline:none;box-shadow:none;">
+                    <i class="fas fa-eye" id="toggleIcon"></i>
+                  </button>
+                </div>
+                <div id="capsLockWarning" class="alert alert-warning mt-2" role="alert" style="display:none;border-left:4px solid #ffc107;padding:8px 12px;font-size:0.875rem;">
+                  <i class="fas fa-exclamation-triangle me-2"></i>
+                  <strong>Caps Lock está ativado!</strong>
+                </div>
+              </div>
+              <div class="text-center mt-4">
+                <button type="submit" id="loginBtn" class="btn" style="background: linear-gradient(135deg, #2B286F 100%); border: none; color: white; padding: 10px 30px; font-weight: 600;">
+                  <span id="loading" class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true" style="display: none;"></span>
+                  <span id="btnText">Entrar</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <style>
+    #togglePassword:hover  { background: none !important; color: #6c757d !important; border: none !important; box-shadow: none !important; }
+    #togglePassword:focus  { background: none !important; color: #6c757d !important; border: none !important; box-shadow: none !important; outline: none !important; }
+    #togglePassword:active { background: none !important; color: #6c757d !important; border: none !important; box-shadow: none !important; }
+    .alert-warning { box-shadow: 0 4px 8px rgba(255, 193, 7, 0.3); }
+  </style>
+  <script>
+    function showError(msg) {
+      const alert = document.getElementById('errorAlert');
+      const text = document.getElementById('errorText');
+      text.textContent = msg || 'Verifique seu usuário e senha.';
+      alert.style.display = '';
+      setTimeout(function() {
+        alert.style.transition = 'opacity 0.5s ease-out';
+        alert.style.opacity = '0';
+        setTimeout(function() {
+          alert.style.display = 'none';
+          alert.style.opacity = '1';
+          alert.style.transition = '';
+        }, 500);
+      }, 2200);
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('logout') === 'true') {
+        document.getElementById('logoutAlert').style.display = '';
+      }
+      if (urlParams.get('error') === 'not_allowed') {
+        showError('Usuário sem permissão para acessar o Cini Manager.');
+      }
+    });
+
+    document.getElementById('togglePassword').addEventListener('click', function() {
+      const passwordField = document.getElementById('password');
+      const toggleIcon = document.getElementById('toggleIcon');
+      if (passwordField.type === 'password') {
+        passwordField.type = 'text';
+        toggleIcon.classList.remove('fa-eye');
+        toggleIcon.classList.add('fa-eye-slash');
+      } else {
+        passwordField.type = 'password';
+        toggleIcon.classList.remove('fa-eye-slash');
+        toggleIcon.classList.add('fa-eye');
+      }
+    });
+
+    const passwordField = document.getElementById('password');
+    const capsLockWarning = document.getElementById('capsLockWarning');
+    function checkCapsLock(e) {
+      const capsLockOn = e.getModifierState && e.getModifierState('CapsLock');
+      capsLockWarning.style.display = capsLockOn ? 'block' : 'none';
+    }
+    passwordField.addEventListener('keydown', checkCapsLock);
+    passwordField.addEventListener('keyup', checkCapsLock);
+    passwordField.addEventListener('focus', function(e) {
+      if (e.getModifierState && e.getModifierState('CapsLock')) capsLockWarning.style.display = 'block';
+    });
+    passwordField.addEventListener('blur', function() { capsLockWarning.style.display = 'none'; });
+
+    document.getElementById('loginForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+      const loginBtn = document.getElementById('loginBtn');
+      const loading = document.getElementById('loading');
+      const btnText = document.getElementById('btnText');
+      loginBtn.disabled = true;
+      loading.style.display = 'inline-block';
+      btnText.textContent = 'Entrando...';
+
+      fetch('/login', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      })
+      .then(async response => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Falha no login');
+        window.location.href = '/';
+      })
+      .catch(error => {
+        showError(error.message || 'Verifique seu usuário e senha.');
+      })
+      .finally(() => {
+        loginBtn.disabled = false;
+        loading.style.display = 'none';
+        btnText.textContent = 'Entrar';
+      });
+    });
+  </script>
+</body>
+</html>

@@ -31,6 +31,7 @@ body{background:var(--bg);color:var(--text);font-family:'Cascadia Code','Fira Co
 .polling-badge{display:inline-flex;align-items:center;gap:6px;line-height:1;overflow:visible;padding:4px 8px}
 .polling-badge .spin{width:12px;height:12px;border-width:2px;margin-right:0;flex-shrink:0}
 .topbar-right{margin-left:auto;display:flex;align-items:center;gap:6px}
+.group-nav{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .btn{background:var(--btn);border:1px solid var(--border);color:var(--text);padding:4px 10px;border-radius:5px;cursor:pointer;font-family:inherit;font-size:12px;transition:background .15s;white-space:nowrap}
 .btn:hover{background:var(--btn-hover)}
 .btn:disabled{opacity:.4;cursor:not-allowed}
@@ -40,6 +41,8 @@ body{background:var(--bg);color:var(--text);font-family:'Cascadia Code','Fira Co
 .btn-orange{border-color:#2d1f00;color:var(--orange)}.btn-orange:hover{background:#2d1f00}
 .btn-yellow{border-color:#332600;color:var(--yellow)}.btn-yellow:hover{background:#332600}
 .btn-sm{padding:3px 8px;font-size:11px}
+.btn-group-chip{padding:3px 9px;border-radius:999px}
+.btn-group-chip.active{background:#0d1f3c;border-color:#2d63b9;color:#9bc7ff}
 .cards-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;border-left:3px solid var(--border);position:relative}
 .card.online{border-left-color:var(--green)}
@@ -168,8 +171,10 @@ body{background:var(--bg);color:var(--text);font-family:'Cascadia Code','Fira Co
     <span id="bdg-on" class="badge badge-green">0 online</span>
     <span id="bdg-off" class="badge badge-red" style="display:none">0 offline</span>
     <span id="bdg-time" class="badge badge-muted">--:--</span>
-    <span class="badge badge-muted">↕ Arraste os cards para ordenar</span>
+    <button class="btn btn-sm btn-blue" onclick="openGroupModal()">➕ Adicionar Grupo</button>
+    <div id="group-nav" class="group-nav"></div>
     <div class="topbar-right">
+      <button class="btn btn-sm" onclick="location.href='/logout'">🔐 Sair</button>
       <button class="btn btn-sm btn-blue" onclick="openAutoPoll()" id="btn-autopoll">🔄 Auto-deploy</button>
       <button class="btn btn-sm btn-yellow" onclick="openRestartResetModal()">🧹 Limpar restarts</button>
       <button class="btn btn-sm btn-orange" onclick="doDeployAll()">🚀 Deploy All</button>
@@ -271,6 +276,17 @@ body{background:var(--bg);color:var(--text);font-family:'Cascadia Code','Fira Co
   </div>
 </div>
 
+<div class="modal-bg" id="group-modal">
+  <div class="modal" style="width:620px;max-width:95vw">
+    <div class="modal-head">
+      <span class="modal-head-title">🗂 Adicionar Grupo</span>
+      <button class="btn btn-sm" onclick="closeGroupModal()">✕</button>
+    </div>
+    <div class="modal-body" id="group-body"></div>
+    <div class="modal-footer" id="group-footer"></div>
+  </div>
+</div>
+
 <div class="modal-bg" id="error-modal">
   <div class="modal" style="width:760px;max-width:95vw">
     <div class="modal-head">
@@ -287,6 +303,8 @@ let autoPollRefreshTimer = null;
 let historyMode = 'deploy';
 let deployHistoryItems = [];
 let errorHistoryItems = [];
+let groups = [];
+let selectedGroupId = 'all';
 const DOCS_APPS = new Set([
   'api-weduu','erp-cini','wf-cini','central-tarefas',
   'hub-cini','cini-pricing','api-sicredi','notificador-pix',
@@ -331,6 +349,10 @@ async function api(method, url, body) {
   }
 
   if (!r.ok) {
+    if (r.status === 401 || r.status === 403) {
+      location.href = '/loginPage';
+      throw new Error('Sessão expirada. Faça login novamente.');
+    }
     if (j && j.error) throw new Error(j.error);
     const short = (raw || '').replace(/\s+/g, ' ').trim().slice(0, 120);
     throw new Error(`HTTP ${r.status} em ${url}${short ? `: ${short}` : ''}`);
@@ -353,9 +375,44 @@ function fmtUptime(ms) {
 async function loadApps() {
   try {
     apps = await api('GET', '/api/apps');
+    await loadGroups();
     renderGrid();
     renderHeader();
   } catch {}
+}
+
+async function loadGroups() {
+  try {
+    groups = await api('GET', '/api/groups');
+  } catch {
+    groups = [];
+  }
+  if (selectedGroupId !== 'all' && !groups.some(g => String(g.id) === String(selectedGroupId))) {
+    selectedGroupId = 'all';
+  }
+  renderGroupNav();
+}
+
+function renderGroupNav() {
+  const el = document.getElementById('group-nav');
+  const base = [`<button class="btn btn-sm btn-group-chip ${selectedGroupId==='all'?'active':''}" onclick="selectGroup('all')">Todos</button>`];
+  const chips = groups.map(g => `<button class="btn btn-sm btn-group-chip ${String(selectedGroupId)===String(g.id)?'active':''}" onclick="selectGroup('${g.id}')">${esc(g.name)}</button>`);
+  el.innerHTML = [...base, ...chips].join('');
+}
+
+function selectGroup(groupId) {
+  selectedGroupId = groupId;
+  renderGroupNav();
+  renderGrid();
+  renderHeader();
+}
+
+function currentVisibleApps() {
+  if (selectedGroupId === 'all') return apps;
+  const group = groups.find(g => String(g.id) === String(selectedGroupId));
+  if (!group) return apps;
+  const allowed = new Set((group.apps || []).map(String));
+  return apps.filter(a => allowed.has(a.name));
 }
 
 async function saveCurrentOrder() {
@@ -413,8 +470,9 @@ function bindCardDnD() {
 }
 
 function renderHeader() {
-  const on  = apps.filter(a=>a.status==='online').length;
-  const off = apps.length - on;
+  const visible = currentVisibleApps();
+  const on  = visible.filter(a=>a.status==='online').length;
+  const off = visible.length - on;
   document.getElementById('bdg-on').textContent  = `${on} online`;
   const bdgOff = document.getElementById('bdg-off');
   if (off > 0) { bdgOff.style.display=''; bdgOff.textContent=`${off} offline`; }
@@ -439,8 +497,9 @@ function cardClass(a) {
 
 function renderGrid() {
   const g = document.getElementById('grid');
-  if (!apps.length) { g.innerHTML='<div class="empty">Nenhum app encontrado.</div>'; return; }
-  g.innerHTML = apps.map(a => {
+  const visibleApps = currentVisibleApps();
+  if (!visibleApps.length) { g.innerHTML='<div class="empty">Nenhum app encontrado no grupo selecionado.</div>'; return; }
+  g.innerHTML = visibleApps.map(a => {
     const cpuColor = a.cpu>80 ? 'var(--red)' : a.cpu>50 ? 'var(--yellow)' : 'var(--text)';
     const memColor = a.memory>400 ? 'var(--red)' : a.memory>200 ? 'var(--yellow)' : 'var(--text)';
     const alertLabel = a.attentionType === 'git' ? 'Falha Git' : (a.attentionType === 'runtime' ? 'Erro App' : 'Falha Deploy');
@@ -479,7 +538,72 @@ function renderGrid() {
       </div>
     </div>`;
   }).join('');
-  bindCardDnD();
+  if (selectedGroupId === 'all') bindCardDnD();
+}
+
+function openGroupModal() {
+  const rows = apps
+    .slice()
+    .sort((a, b) => displayName(a.name).localeCompare(displayName(b.name), 'pt-BR'))
+    .map(a => `<tr>
+      <td style="padding:6px;font-weight:600">${esc(displayName(a.name))}</td>
+      <td style="padding:6px;color:var(--muted)">${esc(a.name)}</td>
+      <td style="padding:6px;text-align:center"><input type="checkbox" class="group-app-check" value="${esc(a.name)}"></td>
+    </tr>`)
+    .join('');
+
+  document.getElementById('group-body').innerHTML = `
+    <div class="section" style="margin-bottom:10px">
+      <div class="section-title">Nome do Grupo</div>
+      <input id="group-name" type="text" placeholder="Ex: Operação Noturna" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:9px 10px" />
+    </div>
+    <div class="section" style="margin-bottom:8px">
+      <div class="section-title">Serviços do Grupo</div>
+      <table class="commit-tbl">
+        <tr>
+          <th style="color:var(--muted);font-size:10px;padding:6px">APP</th>
+          <th style="color:var(--muted);font-size:10px;padding:6px">NOME TÉCNICO</th>
+          <th style="color:var(--muted);font-size:10px;padding:6px;text-align:center">INCLUIR</th>
+        </tr>
+        ${rows}
+      </table>
+    </div>`;
+
+  document.getElementById('group-footer').innerHTML = `
+    <button class="btn" onclick="toggleAllGroupApps(true)">Marcar todos</button>
+    <button class="btn" onclick="toggleAllGroupApps(false)">Desmarcar</button>
+    <button class="btn btn-blue" onclick="confirmCreateGroup()">Salvar Grupo</button>
+    <button class="btn" onclick="closeGroupModal()">Cancelar</button>`;
+
+  document.getElementById('group-modal').classList.add('open');
+}
+
+function closeGroupModal() {
+  document.getElementById('group-modal').classList.remove('open');
+}
+
+function toggleAllGroupApps(checked) {
+  document.querySelectorAll('.group-app-check').forEach(el => { el.checked = checked; });
+}
+
+async function confirmCreateGroup() {
+  const name = (document.getElementById('group-name')?.value || '').trim();
+  const selected = Array.from(document.querySelectorAll('.group-app-check:checked')).map(el => el.value);
+  if (!name) return toast('Informe o nome do grupo', 'err');
+  if (!selected.length) return toast('Selecione ao menos um serviço', 'err');
+
+  try {
+    const result = await api('POST', '/api/groups', { name, apps: selected });
+    toast(`Grupo "${result.group.name}" criado`);
+    closeGroupModal();
+    await loadGroups();
+    selectedGroupId = String(result.group.id);
+    renderGroupNav();
+    renderGrid();
+    renderHeader();
+  } catch (e) {
+    toast(e.message, 'err');
+  }
 }
 
 async function doAction(name, action) {
@@ -1173,6 +1297,15 @@ async function openErrorModal(name) {
   document.getElementById('error-title').textContent = `🔴 Erro — ${displayName(name)}`;
   document.getElementById('error-body').innerHTML = '<span class="spin"></span> Carregando detalhes...';
   document.getElementById('error-modal').classList.add('open');
+
+  const appEntry = apps.find(a => a.name === name);
+  if (appEntry) {
+    appEntry.hasAttention = false;
+    appEntry.attentionType = null;
+    appEntry.attentionReason = null;
+    renderGrid();
+    renderHeader();
+  }
 
   api('POST', `/api/apps/${name}/ack-errors`)
     .then(() => loadApps())

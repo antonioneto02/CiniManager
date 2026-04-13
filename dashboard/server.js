@@ -1,17 +1,260 @@
 'use strict';
+require('dotenv').config();
 const express       = require('express');
 const pm2           = require('pm2');
 const path          = require('path');
 const fs            = require('fs');
+const axios         = require('axios');
+const session       = require('express-session');
+const cookieParser  = require('cookie-parser');
 const { execSync, execFileSync, execFile } = require('child_process');
 const crypto        = require('crypto');
 const sql           = require('mssql');
 const app  = express();
 const PORT = parseInt(process.env.DASHBOARD_PORT) || 9999;
 
+const PROTHEUS_SERVER = process.env.PROTHEUS_SERVER || 'protheus.cini.com.br';
+const SESSION_SECRET = process.env.SESSION_SECRET || 'cini_manager_secret_2026';
+const ALLOWED_USER_BY_ID = {
+  '000460': 'antonio.neto',
+  '000005': 'nerias',
+};
+
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
+app.use(session({
+  secret: SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  cookie: { maxAge: 8 * 60 * 60 * 1000 },
+}));
 app.get('/Cini.png', (req, res) => res.sendFile(path.join(__dirname, 'Cini.png')));
+
+function normalizeUserId(v) {
+  return String(v || '').trim().padStart(6, '0');
+}
+
+function normalizeUsername(v) {
+  return String(v || '').trim().toLowerCase();
+}
+
+function isAllowedUserId(userId) {
+  return !!ALLOWED_USER_BY_ID[normalizeUserId(userId)];
+}
+
+function isAllowedUserPair(userId, username) {
+  const id = normalizeUserId(userId);
+  const expected = ALLOWED_USER_BY_ID[id];
+  if (!expected) return false;
+  return normalizeUsername(username) === normalizeUsername(expected);
+}
+
+function clearAuthCookies(res) {
+  res.clearCookie('token', { httpOnly: true, secure: false, sameSite: 'lax' });
+  res.clearCookie('refresh_token', { httpOnly: true, secure: false, sameSite: 'lax' });
+  res.clearCookie('username', { httpOnly: true, secure: false, sameSite: 'lax' });
+}
+
+async function fetchUserFromToken(accessToken) {
+  const userIdResp = await axios.get(
+    `http://${PROTHEUS_SERVER}:9001/rest/users/getuserid`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  const userID = normalizeUserId(userIdResp?.data?.userID);
+  if (!userID) throw new Error('user_id_not_found');
+
+  let profile = {};
+  try {
+    const userResp = await axios.get(
+      `http://${PROTHEUS_SERVER}:9001/rest/users/${userID}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    profile = userResp?.data || {};
+  } catch {}
+
+  const displayName = String(profile.name || profile.fullName || profile.displayName || ALLOWED_USER_BY_ID[userID] || userID);
+  return { userID, displayName };
+}
+
+async function refreshToken(refreshToken, res) {
+  const response = await axios.post(
+    `http://${PROTHEUS_SERVER}:9001/rest/api/oauth2/v1/token`,
+    null,
+    {
+      params: {
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+      },
+    }
+  );
+
+  const accessToken = response?.data?.access_token;
+  const newRefreshToken = response?.data?.refresh_token;
+  if (!accessToken || !newRefreshToken) throw new Error('refresh_failed');
+
+  res.cookie('token', accessToken, {
+    httpOnly: true,
+    secure: false,
+    sameSite: 'lax',
+    maxAge: 3600000,
+  });
+  res.cookie('refresh_token', newRefreshToken, {
+    httpOnly: true,
+    secure: false,
+    sameSite: 'lax',
+    maxAge: 43200000,
+  });
+  return accessToken;
+}
+
+function denyAuth(req, res) {
+  if (req.path.startsWith('/api/')) {
+    return res.status(401).json({ error: 'Não autenticado' });
+  }
+  return res.redirect('/loginPage');
+}
+
+async function ensureAuth(req, res, next) {
+  if (
+    req.session &&
+    req.session.userID &&
+    req.session.username &&
+    isAllowedUserPair(req.session.userID, req.session.username)
+  ) {
+    req.session.lastActivity = Date.now();
+    return next();
+  }
+
+  let token = req.cookies && req.cookies.token;
+  const refresh = req.cookies && req.cookies.refresh_token;
+  if (!token && refresh) {
+    try {
+      token = await refreshToken(refresh, res);
+    } catch {
+      clearAuthCookies(res);
+      if (req.session) req.session.destroy(() => {});
+      return denyAuth(req, res);
+    }
+  }
+
+  if (!token) return denyAuth(req, res);
+
+  try {
+    const { userID, displayName } = await fetchUserFromToken(token);
+    if (!isAllowedUserId(userID)) {
+      clearAuthCookies(res);
+      if (req.session) req.session.destroy(() => {});
+      if (req.path.startsWith('/api/')) {
+        return res.status(403).json({ error: 'Usuário sem permissão no Cini Manager' });
+      }
+      return res.redirect('/loginPage?error=not_allowed');
+    }
+
+    req.session.userID = userID;
+    req.session.username = ALLOWED_USER_BY_ID[userID];
+    req.session.displayName = displayName;
+    req.session.lastActivity = Date.now();
+    return next();
+  } catch {
+    clearAuthCookies(res);
+    if (req.session) req.session.destroy(() => {});
+    return denyAuth(req, res);
+  }
+}
+
+app.get('/loginPage', (req, res) => {
+  if (
+    req.session &&
+    req.session.userID &&
+    req.session.username &&
+    isAllowedUserPair(req.session.userID, req.session.username)
+  ) {
+    return res.redirect('/');
+  }
+  return res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+app.post('/login', async (req, res) => {
+  const username = normalizeUsername(req.body.username);
+  const password = req.body.password || '';
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Preencha usuário e senha' });
+  }
+
+  try {
+    const tokenResp = await axios.post(
+      `http://${PROTHEUS_SERVER}:9001/rest/api/oauth2/v1/token`,
+      null,
+      {
+        params: {
+          grant_type: 'password',
+          username,
+          password,
+        },
+      }
+    );
+    const accessToken = tokenResp?.data?.access_token;
+    const refreshTokenValue = tokenResp?.data?.refresh_token;
+    if (!accessToken || !refreshTokenValue) {
+      return res.status(401).json({ error: 'Credenciais inválidas' });
+    }
+
+    const { userID, displayName } = await fetchUserFromToken(accessToken);
+    const expectedUsername = ALLOWED_USER_BY_ID[userID];
+    if (!expectedUsername || username !== expectedUsername) {
+      clearAuthCookies(res);
+      if (req.session) req.session.destroy(() => {});
+      return res.status(403).json({ error: 'Acesso negado ao Cini Manager' });
+    }
+
+    res.cookie('token', accessToken, {
+      httpOnly: true,
+      secure: false,
+      sameSite: 'lax',
+      maxAge: 3600000,
+    });
+    res.cookie('refresh_token', refreshTokenValue, {
+      httpOnly: true,
+      secure: false,
+      sameSite: 'lax',
+      maxAge: 43200000,
+    });
+    res.cookie('username', username, {
+      httpOnly: true,
+      secure: false,
+      sameSite: 'lax',
+      maxAge: 43200000,
+    });
+
+    req.session.userID = userID;
+    req.session.username = username;
+    req.session.displayName = displayName;
+    req.session.lastActivity = Date.now();
+
+    return res.json({ ok: true });
+  } catch {
+    clearAuthCookies(res);
+    if (req.session) req.session.destroy(() => {});
+    return res.status(401).json({ error: 'Credenciais inválidas' });
+  }
+});
+
+app.get('/logout', (req, res) => {
+  clearAuthCookies(res);
+  if (req.session) req.session.destroy(() => {});
+  return res.redirect('/loginPage?logout=true');
+});
+
+app.use((req, res, next) => {
+  if (req.path === '/loginPage' || req.path === '/login' || req.path === '/logout' || req.path === '/Cini.png') {
+    return next();
+  }
+  return ensureAuth(req, res, next);
+});
+
+app.use(express.static(path.join(__dirname, 'public')));
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 const APP_REGISTRY = {
   'api-weduu':       'C:/Projetos/API_Weduu',
@@ -87,12 +330,115 @@ const DB_CFG   = {
   pool:     { max: 3, min: 0, idleTimeoutMillis: 10000 },
 };
 
+const GROUPS_DB_CFG = {
+  server: process.env.DB_SERVER_ERP || 'localhost',
+  database: process.env.DB_DATABASE_DW || 'dw',
+  user: process.env.DB_USER_ERP || 'gestao.portaria',
+  password: process.env.DB_PASSWORD_ERP || '0wd10ARpf522tQzM',
+  options: { trustServerCertificate: true, encrypt: false },
+  pool: { max: 2, min: 0, idleTimeoutMillis: 10000 },
+};
+
 let _pool = null;
+let _groupsPool = null;
 async function getPool() {
   if (_pool) return _pool;
   _pool = await new sql.ConnectionPool(DB_CFG).connect();
   _pool.on('error', () => { _pool = null; });
   return _pool;
+}
+
+async function getGroupsPool() {
+  if (_groupsPool) return _groupsPool;
+  _groupsPool = await new sql.ConnectionPool(GROUPS_DB_CFG).connect();
+  _groupsPool.on('error', () => { _groupsPool = null; });
+  return _groupsPool;
+}
+
+async function listServiceGroups() {
+  const p = await getGroupsPool();
+  const groupsRs = await p.request().query(`
+    SELECT ID_GRUPO, NOME_GRUPO
+    FROM dbo.CINI_MANAGER_GRUPOS
+    WHERE ATIVO = 1
+    ORDER BY NOME_GRUPO
+  `);
+  const appsRs = await p.request().query(`
+    SELECT ID_GRUPO, APP_NAME, ORDEM
+    FROM dbo.CINI_MANAGER_GRUPOS_APPS
+    ORDER BY ID_GRUPO, ORDEM, APP_NAME
+  `);
+
+  const byGroup = new Map();
+  for (const g of groupsRs.recordset || []) {
+    byGroup.set(Number(g.ID_GRUPO), {
+      id: Number(g.ID_GRUPO),
+      name: String(g.NOME_GRUPO || '').trim(),
+      apps: [],
+    });
+  }
+
+  for (const row of appsRs.recordset || []) {
+    const group = byGroup.get(Number(row.ID_GRUPO));
+    if (!group) continue;
+    group.apps.push(String(row.APP_NAME || '').trim());
+  }
+
+  return Array.from(byGroup.values());
+}
+
+async function createServiceGroup(name, apps) {
+  const cleanName = String(name || '').trim();
+  const validApps = Object.keys(APP_REGISTRY).filter(x => !DEPLOY_EXCLUDE.has(x));
+  const selectedApps = [...new Set((Array.isArray(apps) ? apps : []).map(a => String(a || '').trim()).filter(a => validApps.includes(a)))];
+
+  if (!cleanName) throw new Error('Informe o nome do grupo');
+  if (cleanName.length > 120) throw new Error('Nome do grupo muito longo (máx 120)');
+  if (!selectedApps.length) throw new Error('Selecione ao menos um serviço para o grupo');
+
+  const p = await getGroupsPool();
+  const tx = new sql.Transaction(p);
+  await tx.begin();
+  try {
+    const checkReq = new sql.Request(tx);
+    checkReq.input('nome', sql.NVarChar(120), cleanName);
+    const exists = await checkReq.query(`
+      SELECT TOP 1 ID_GRUPO
+      FROM dbo.CINI_MANAGER_GRUPOS
+      WHERE UPPER(NOME_GRUPO) = UPPER(@nome)
+        AND ATIVO = 1
+    `);
+    if ((exists.recordset || []).length) {
+      throw new Error('Já existe um grupo com este nome');
+    }
+
+    const insReq = new sql.Request(tx);
+    insReq.input('nome', sql.NVarChar(120), cleanName);
+    const ins = await insReq.query(`
+      INSERT INTO dbo.CINI_MANAGER_GRUPOS (NOME_GRUPO, ATIVO, DTINC)
+      OUTPUT INSERTED.ID_GRUPO
+      VALUES (@nome, 1, GETDATE())
+    `);
+    const groupId = Number(ins.recordset[0].ID_GRUPO);
+
+    for (let i = 0; i < selectedApps.length; i++) {
+      const appName = selectedApps[i];
+      const appReq = new sql.Request(tx);
+      appReq.input('idGrupo', sql.Int, groupId);
+      appReq.input('appName', sql.NVarChar(120), appName);
+      appReq.input('ordem', sql.Int, i + 1);
+      await appReq.query(`
+        INSERT INTO dbo.CINI_MANAGER_GRUPOS_APPS (ID_GRUPO, APP_NAME, ORDEM, DTINC)
+        VALUES (@idGrupo, @appName, @ordem, GETDATE())
+      `);
+    }
+
+    await tx.commit();
+    return { id: groupId, name: cleanName, apps: selectedApps };
+  } catch (err) {
+    try { await tx.rollback(); } catch {}
+    throw err;
+  }
 }
 
 async function sendWhatsApp(msg) {
@@ -122,6 +468,7 @@ async function notifyWhatsApp(title, lines = []) {
 }
 
 const runtimeAlerts = new Map();
+const acknowledgedAlertAt = new Map();
 const logAlertThrottle = new Map();
 const gitAlertThrottle = new Map();
 const APP_ERROR_DUP_WINDOW_MS = 1000;
@@ -153,6 +500,10 @@ const LOG_ERROR_IGNORE_PATTERNS = [
   /processando /i,
   /aguardando \d+s/i,
   /pagina(?:ç|c)[aã]o/i,
+  /connect\.session\(\)\s*memorystore\s*is not/i,
+  /not\s+designed\s+for\s+a\s+production\s+environment/i,
+  /will\s+leak\s+memory/i,
+  /will\s+not\s+scale\s+past\s+a\s+single\s+process/i,
 ];
 
 function rememberRuntimeAlert(appName, type, reason) {
@@ -271,7 +622,7 @@ async function notifyGitPollError(appName, message) {
 }
 
 async function notifyPm2EventError(appName, event) {
-  const criticalEvents = new Set(['exit', 'exit overlimit', 'restart overlimit', 'errored']);
+  const criticalEvents = new Set(['exit overlimit', 'restart overlimit', 'errored']);
   if (!criticalEvents.has(String(event || '').toLowerCase())) return;
 
   const signature = `${appName}:pm2-event:${String(event).toLowerCase()}`;
@@ -1098,6 +1449,7 @@ let pollingRunning = false;
 let lastPollTime   = null;
 let cachedGitInfo  = {};
 let pollErrors     = {};
+const pollErrorAt  = {};
 
 async function refreshGitCache() {
   const info = {};
@@ -1133,11 +1485,13 @@ async function pollGitUpdates() {
       const fetchOk = await gitAsync('fetch --quiet', gitRoot, false, 8000);
       if (fetchOk === null) {
         pollErrors[appName] = 'git fetch falhou (autenticação?)';
+        pollErrorAt[appName] = Date.now();
         console.error(`[poll] ${appName}: git fetch falhou`);
         await notifyGitPollError(appName, pollErrors[appName]);
         continue;
       }
       delete pollErrors[appName];
+      delete pollErrorAt[appName];
 
       const branch     = await gitAsync('rev-parse --abbrev-ref HEAD', gitRoot) || 'main';
       const localHash  = await gitAsync('rev-parse HEAD', gitRoot);
@@ -1171,6 +1525,7 @@ async function pollGitUpdates() {
 
     } catch (e) {
       pollErrors[appName] = e.message;
+      pollErrorAt[appName] = Date.now();
       console.error(`[poll] Erro ao verificar ${appName}:`, e.message);
       await notifyGitPollError(appName, e.message);
     }
@@ -1257,10 +1612,18 @@ app.get('/api/apps', async (req, res) => {
     const data = filtered.map((p, i) => {
       const status = p.pm2_env.status;
       const gitError = pollErrors[p.name] || null;
-      const runtimeError = getRuntimeAlert(p.name)?.reason || null;
+      const runtimeAlert = getRuntimeAlert(p.name);
+      const runtimeError = runtimeAlert?.reason || null;
       const deployError = status !== 'online' ? (lastErrors.get(p.name)?.detail || null) : null;
-      const attentionReason = gitError || runtimeError || deployError;
-      const attentionType = gitError ? 'git' : (runtimeError ? 'runtime' : (deployError ? 'deploy' : null));
+      let attentionReason = gitError || runtimeError || deployError;
+      let attentionType = gitError ? 'git' : (runtimeError ? 'runtime' : (deployError ? 'deploy' : null));
+
+      const alertTs = Math.max(pollErrorAt[p.name] || 0, runtimeAlert?.ts || 0);
+      const ackTs = acknowledgedAlertAt.get(p.name) || 0;
+      if (attentionReason && alertTs > 0 && ackTs >= alertTs) {
+        attentionReason = null;
+        attentionType = null;
+      }
 
       return {
         id:         p.pm_id,
@@ -1337,8 +1700,10 @@ app.post('/api/apps/:name/ack-errors', (req, res) => {
   const { name } = req.params;
   if (!APP_REGISTRY[name]) return res.status(404).json({ error: 'App não encontrado' });
 
+  acknowledgedAlertAt.set(name, Date.now());
   runtimeAlerts.delete(name);
   delete pollErrors[name];
+  delete pollErrorAt[name];
 
   res.json({ ok: true, app: name, cleared: true });
 });
@@ -1716,6 +2081,29 @@ app.get('/api/autopoll/config', (req, res) => {
     polling: pollingRunning,
     apps: appStatus,
   });
+});
+
+app.get('/api/groups', async (req, res) => {
+  try {
+    const groups = await listServiceGroups();
+    res.json(groups);
+  } catch (e) {
+    res.status(500).json({ error: `Falha ao carregar grupos: ${e.message}` });
+  }
+});
+
+app.post('/api/groups', async (req, res) => {
+  try {
+    const created = await createServiceGroup(req.body?.name, req.body?.apps);
+    await notifyWhatsApp('🗂 Grupo criado no dashboard', [
+      `📛 Grupo: ${created.name}`,
+      `📱 Serviços: ${created.apps.map(appLabel).join(', ')}`,
+      '📌 Origem: dashboard',
+    ]);
+    res.json({ ok: true, group: created });
+  } catch (e) {
+    res.status(400).json({ error: e.message || 'Falha ao criar grupo' });
+  }
 });
 
 app.post('/api/autopoll/toggle', (req, res) => {

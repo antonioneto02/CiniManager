@@ -1,8 +1,10 @@
 {
   "apps": [
-    "api-weduu",
-    "erp-cini",
+    "client-baixas-pix",
+    "central-notificacoes",
     "wf-cini",
+    "erp-cini",
+    "api-weduu",
     "central-tarefas",
     "hub-cini",
     "cini-pricing",
@@ -11,12 +13,10 @@
     "cini-dashboard",
     "whatsapp-bot",
     "webhook-whatsapp",
-    "client-baixas-pix",
     "portal-consultas",
     "portal-streamlit",
     "gerenciador-cargas",
     "whatsapp-motoristas",
-    "whatsapp-webnode",
-    "central-notificacoes"
+    "whatsapp-webnode"
   ]
 }
