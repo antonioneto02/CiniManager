@@ -1040,21 +1040,36 @@ app.post('/api/apps/:name/:action', async (req, res) => {
   }
 });
 
-app.post('/api/apps/:name/reset-restarts', async (req, res) => {
-  const { name } = req.params;
-  if (!APP_REGISTRY[name]) return res.status(404).json({ error: 'App não encontrado' });
-  try {
-    await pm2Do('reset', name);
-    deployHistory.unshift({ time: now(), app: name, status: 'ok', detail: 'reset restarts' });
-    if (deployHistory.length > 30) deployHistory.pop();
-    pushHistory();
-    res.json({ ok: true, app: name });
-  } catch (e) {
-    deployHistory.unshift({ time: now(), app: name, status: 'error', detail: `reset restarts falhou: ${e.message}` });
-    if (deployHistory.length > 30) deployHistory.pop();
-    pushHistory();
-    res.status(500).json({ error: e.message });
+app.post('/api/apps/reset-restarts', async (req, res) => {
+  const requestedApps = Array.isArray(req.body?.apps) ? req.body.apps : [];
+  const appNames = [...new Set(requestedApps.filter(name => APP_REGISTRY[name]))];
+  if (!appNames.length) return res.status(400).json({ error: 'Nenhuma aplicação válida foi selecionada' });
+
+  const results = [];
+  for (const name of appNames) {
+    try {
+      await pm2Do('reset', name);
+      deployHistory.unshift({ time: now(), app: name, status: 'ok', detail: 'reset restarts' });
+      if (deployHistory.length > 30) deployHistory.pop();
+      results.push({ app: name, ok: true });
+    } catch (e) {
+      deployHistory.unshift({ time: now(), app: name, status: 'error', detail: `reset restarts falhou: ${e.message}` });
+      if (deployHistory.length > 30) deployHistory.pop();
+      results.push({ app: name, ok: false, error: e.message });
+    }
   }
+
+  pushHistory();
+
+  const failed = results.filter(item => !item.ok);
+  if (failed.length) {
+    return res.status(500).json({
+      error: `Falha ao limpar ${failed.length} aplicação(ões)`,
+      results,
+    });
+  }
+
+  res.json({ ok: true, results });
 });
 
 app.post('/api/all/:action', async (req, res) => {

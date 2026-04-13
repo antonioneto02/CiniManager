@@ -492,25 +492,40 @@ async function actionAll(action) {
 }
 
 function openRestartResetModal() {
-  const options = apps
+  const rows = apps
     .slice()
     .sort((a, b) => displayName(a.name).localeCompare(displayName(b.name), 'pt-BR'))
-    .map(a => `<option value="${esc(a.name)}">${esc(displayName(a.name))} (${esc(a.name)})</option>`)
+    .map(a => `<tr>
+      <td style="padding:6px;font-weight:600">${esc(displayName(a.name))}</td>
+      <td style="padding:6px;color:var(--muted)">${esc(a.name)}</td>
+      <td style="padding:6px;text-align:center">${a.restarts || 0}</td>
+      <td style="padding:6px;text-align:center">
+        <input type="checkbox" class="restart-reset-check" value="${esc(a.name)}" ${a.restarts > 0 ? 'checked' : ''} />
+      </td>
+    </tr>`)
     .join('');
 
   document.getElementById('restart-reset-body').innerHTML = `
     <div class="section" style="margin-bottom:8px">
       <div class="section-title">Escolha a aplicação</div>
       <p style="color:var(--muted);font-size:12px;margin-bottom:10px">
-        Isso zera o contador de restarts da aplicação selecionada no PM2.
+        Selecione uma ou mais aplicações para zerar o contador de restarts no PM2.
       </p>
-      <select id="restart-reset-app" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-family:inherit;font-size:12px">
-        ${options || '<option disabled selected>Nenhuma aplicação disponível</option>'}
-      </select>
+      <table class="commit-tbl">
+        <tr>
+          <th style="color:var(--muted);font-size:10px;padding:6px">APP</th>
+          <th style="color:var(--muted);font-size:10px;padding:6px">NOME TÉCNICO</th>
+          <th style="color:var(--muted);font-size:10px;padding:6px;text-align:center">RESTARTS</th>
+          <th style="color:var(--muted);font-size:10px;padding:6px;text-align:center">LIMPAR</th>
+        </tr>
+        ${rows || '<tr><td colspan="4" style="padding:10px;text-align:center;color:var(--muted)">Nenhuma aplicação disponível</td></tr>'}
+      </table>
     </div>`;
 
   document.getElementById('restart-reset-footer').innerHTML = `
-    <button class="btn btn-yellow" onclick="confirmRestartReset()" ${options ? '' : 'disabled'}>🧹 Limpar</button>
+    <button class="btn" onclick="toggleAllRestartReset(true)">Marcar todos</button>
+    <button class="btn" onclick="toggleAllRestartReset(false)">Desmarcar</button>
+    <button class="btn btn-yellow" onclick="confirmRestartReset()" ${rows ? '' : 'disabled'}>🧹 Limpar selecionados</button>
     <button class="btn" onclick="closeRestartResetModal()">Cancelar</button>`;
 
   document.getElementById('restart-reset-modal').classList.add('open');
@@ -521,18 +536,26 @@ function closeRestartResetModal() {
 }
 
 async function confirmRestartReset() {
-  const sel = document.getElementById('restart-reset-app');
-  const name = sel?.value;
-  if (!name) return;
+  const selected = Array.from(document.querySelectorAll('.restart-reset-check:checked')).map(el => el.value);
+  if (!selected.length) {
+    toast('Selecione pelo menos uma aplicação', 'err');
+    return;
+  }
 
   try {
-    await api('POST', `/api/apps/${name}/reset-restarts`);
-    toast(`${displayName(name)}: contador de restarts zerado`);
+    const result = await api('POST', '/api/apps/reset-restarts', { apps: selected });
+    toast(`${result.results.length} aplicação(ões) com contador zerado`);
     closeRestartResetModal();
     await loadApps();
   } catch (e) {
-    toast(`${displayName(name)}: ${e.message}`, 'err');
+    toast(e.message, 'err');
   }
+}
+
+function toggleAllRestartReset(checked) {
+  document.querySelectorAll('.restart-reset-check').forEach(el => {
+    el.checked = checked;
+  });
 }
 
 async function doDeploy(name) {
