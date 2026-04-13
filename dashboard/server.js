@@ -984,20 +984,36 @@ app.get('/api/apps', async (req, res) => {
     const HIDE = new Set(['log-watcher']);
     const filtered = list.filter(p => !p.name.startsWith('pm2-') && !HIDE.has(p.name));
     const commits = await Promise.all(filtered.map(p => getLastCommit(p.name).catch(() => null)));
-    const data = filtered.map((p, i) => ({
+    const lastErrors = new Map();
+    for (const item of deployHistory) {
+      if (item.status !== 'error') continue;
+      if (!lastErrors.has(item.app)) lastErrors.set(item.app, item);
+    }
+    const data = filtered.map((p, i) => {
+      const status = p.pm2_env.status;
+      const gitError = pollErrors[p.name] || null;
+      const deployError = status !== 'online' ? (lastErrors.get(p.name)?.detail || null) : null;
+      const attentionReason = gitError || deployError;
+      const attentionType = gitError ? 'git' : (deployError ? 'deploy' : null);
+
+      return {
         id:         p.pm_id,
         name:       p.name,
-        status:     p.pm2_env.status,
+        status,
         cpu:        p.monit?.cpu ?? 0,
         memory:     Math.round((p.monit?.memory ?? 0) / 1024 / 1024),
         restarts:   p.pm2_env.restart_time,
-        uptime:     p.pm2_env.status === 'online' ? p.pm2_env.pm_uptime : null,
+        uptime:     status === 'online' ? p.pm2_env.pm_uptime : null,
         pid:        p.pid,
         port:       readAppPort(p.name),
         hasGit:     !!APP_REGISTRY[p.name] && !!findGitRoot(APP_REGISTRY[p.name]),
         deploying:  deployLock.has(p.name),
         lastCommit: commits[i] || null,
-    }));
+        hasAttention: !!attentionReason,
+        attentionType,
+        attentionReason,
+      };
+    });
     res.json(data);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1154,7 +1170,6 @@ app.post('/api/deploy-all', (req, res) => {
 });
 
 const fileTailState = {};
-
 function consumeFileTail(fp) {
   const st = fileTailState[fp];
   if (!st || st.reading || st.watchers.size === 0) return;

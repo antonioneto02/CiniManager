@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "intervalMin": 2,
+  "apps": {
+    "central-notificacoes": {
+      "lastHash": "e3d3789"
+    }
+  }
+}

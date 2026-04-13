@@ -40,20 +40,26 @@ body{background:var(--bg);color:var(--text);font-family:'Cascadia Code','Fira Co
 .btn-orange{border-color:#2d1f00;color:var(--orange)}.btn-orange:hover{background:#2d1f00}
 .btn-sm{padding:3px 8px;font-size:11px}
 .cards-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
-.card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;border-left:3px solid var(--border)}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;border-left:3px solid var(--border);position:relative}
 .card.online{border-left-color:var(--green)}
 .card.stopped{border-left-color:var(--muted)}
 .card.errored{border-left-color:var(--red)}
 .card.deploying{border-left-color:var(--yellow)}
+.card.attention{border-left-color:var(--red);box-shadow:0 0 0 1px rgba(248,81,73,.2)}
+.card.dragging{opacity:.55;transform:scale(.99)}
 .card-header{display:flex;align-items:center;gap:8px;margin-bottom:10px}
 .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 .dot-green{background:var(--green);box-shadow:0 0 5px var(--green)}
 .dot-red{background:var(--red)}
+.dot-red-alert{background:var(--red);box-shadow:0 0 8px var(--red);animation:pulse 1s infinite}
 .dot-yellow{background:var(--yellow);box-shadow:0 0 5px var(--yellow);animation:pulse 1.2s infinite}
 .dot-gray{background:var(--muted)}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 .card-name{font-weight:700;font-size:14px;flex:1}
 .card-pid{color:var(--muted);font-size:10px}
+.drag-handle{color:var(--muted);font-size:12px;cursor:grab;user-select:none}
+.drag-handle:active{cursor:grabbing}
+.alert-badge{display:inline-flex;align-items:center;gap:5px;background:#2d0f0f;color:#ff9b97;border:1px solid #66302d;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:700;white-space:nowrap}
 .metrics{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px}
 .metric{background:var(--surface2);border-radius:4px;padding:5px 8px}
 .m-label{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.4px}
@@ -159,6 +165,7 @@ body{background:var(--bg);color:var(--text);font-family:'Cascadia Code','Fira Co
     <span id="bdg-on" class="badge badge-green">0 online</span>
     <span id="bdg-off" class="badge badge-red" style="display:none">0 offline</span>
     <span id="bdg-time" class="badge badge-muted">--:--</span>
+    <span class="badge badge-muted">↕ Arraste os cards para ordenar</span>
     <div class="topbar-right">
       <button class="btn btn-sm btn-blue" onclick="openAutoPoll()" id="btn-autopoll">🔄 Auto-deploy</button>
       <button class="btn btn-sm btn-orange" onclick="doDeployAll()">🚀 Deploy All</button>
@@ -249,6 +256,7 @@ body{background:var(--bg);color:var(--text);font-family:'Cascadia Code','Fira Co
 <script>
 let apps = [], sse = null, sseLogName = null, autoScroll = true, currentGit = null;
 let autoPollRefreshTimer = null;
+const CARD_ORDER_KEY = 'cini-manager-card-order.v1';
 const DOCS_APPS = new Set([
   'api-weduu','erp-cini','wf-cini','central-tarefas',
   'hub-cini','cini-pricing','api-sicredi','notificador-pix',
@@ -307,10 +315,84 @@ function fmtUptime(ms) {
 
 async function loadApps() {
   try {
-    apps = await api('GET', '/api/apps');
+    const loaded = await api('GET', '/api/apps');
+    apps = applySavedOrder(loaded);
     renderGrid();
     renderHeader();
   } catch {}
+}
+
+function applySavedOrder(list) {
+  let saved = [];
+  try {
+    saved = JSON.parse(localStorage.getItem(CARD_ORDER_KEY) || '[]');
+    if (!Array.isArray(saved)) saved = [];
+  } catch {
+    saved = [];
+  }
+  if (!saved.length) return list;
+
+  const indexMap = new Map(saved.map((name, idx) => [name, idx]));
+  return [...list].sort((a, b) => {
+    const ia = indexMap.has(a.name) ? indexMap.get(a.name) : Number.MAX_SAFE_INTEGER;
+    const ib = indexMap.has(b.name) ? indexMap.get(b.name) : Number.MAX_SAFE_INTEGER;
+    if (ia !== ib) return ia - ib;
+    return displayName(a.name).localeCompare(displayName(b.name), 'pt-BR');
+  });
+}
+
+function saveCurrentOrder() {
+  const order = Array.from(document.querySelectorAll('#grid .card[data-app]')).map(el => el.dataset.app);
+  localStorage.setItem(CARD_ORDER_KEY, JSON.stringify(order));
+}
+
+function syncAppsOrderFromDom() {
+  const order = Array.from(document.querySelectorAll('#grid .card[data-app]')).map(el => el.dataset.app);
+  if (!order.length) return;
+  const pos = new Map(order.map((name, idx) => [name, idx]));
+  apps.sort((a, b) => (pos.get(a.name) ?? Number.MAX_SAFE_INTEGER) - (pos.get(b.name) ?? Number.MAX_SAFE_INTEGER));
+}
+
+function bindCardDnD() {
+  const grid = document.getElementById('grid');
+  const cards = Array.from(grid.querySelectorAll('.card[data-app]'));
+  let dragging = null;
+
+  cards.forEach(card => {
+    card.addEventListener('dragstart', e => {
+      dragging = card;
+      card.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', card.dataset.app || '');
+    });
+
+    card.addEventListener('dragover', e => {
+      e.preventDefault();
+      if (!dragging || dragging === card) return;
+      const rect = card.getBoundingClientRect();
+      const insertAfter = e.clientY > rect.top + rect.height / 2;
+      if (insertAfter) card.after(dragging);
+      else card.before(dragging);
+    });
+
+    card.addEventListener('drop', e => {
+      e.preventDefault();
+      if (!dragging) return;
+      dragging.classList.remove('dragging');
+      dragging = null;
+      syncAppsOrderFromDom();
+      saveCurrentOrder();
+      toast('Ordem dos cards atualizada');
+    });
+
+    card.addEventListener('dragend', () => {
+      if (!dragging) return;
+      dragging.classList.remove('dragging');
+      dragging = null;
+      syncAppsOrderFromDom();
+      saveCurrentOrder();
+    });
+  });
 }
 
 function renderHeader() {
@@ -324,12 +406,14 @@ function renderHeader() {
 
 function dotClass(a) {
   if (a.deploying) return 'dot dot-yellow';
+  if (a.hasAttention) return 'dot dot-red-alert';
   if (a.status==='online') return 'dot dot-green';
   if (a.status==='stopped'||a.status==='stopping') return 'dot dot-gray';
   return 'dot dot-red';
 }
 
 function cardClass(a) {
+  if (a.hasAttention) return 'card attention';
   if (a.deploying)  return 'card deploying';
   if (a.status==='online') return 'card online';
   if (a.status==='stopped'||a.status==='stopping') return 'card stopped';
@@ -342,10 +426,13 @@ function renderGrid() {
   g.innerHTML = apps.map(a => {
     const cpuColor = a.cpu>80 ? 'var(--red)' : a.cpu>50 ? 'var(--yellow)' : 'var(--text)';
     const memColor = a.memory>400 ? 'var(--red)' : a.memory>200 ? 'var(--yellow)' : 'var(--text)';
-    return `<div class="${cardClass(a)}">
+    const alertLabel = a.attentionType === 'git' ? 'Falha Git' : 'Falha Deploy';
+    return `<div class="${cardClass(a)}" data-app="${esc(a.name)}" draggable="true" title="${a.hasAttention ? esc(a.attentionReason || 'Falha de deploy') : ''}">
       <div class="card-header">
         <span class="${dotClass(a)}"></span>
         <span class="card-name">${esc(displayName(a.name))}</span>
+        <span class="drag-handle" title="Arraste para mover">⋮⋮</span>
+        ${a.hasAttention ? `<span class="alert-badge" title="${esc(a.attentionReason || '')}">🔴 ${alertLabel}</span>` : ''}
         <span class="card-pid">${a.status==='online' ? (a.port ? `:${a.port}` : `pid:${a.pid}`) : a.status}</span>
       </div>
       <div class="metrics">
@@ -370,6 +457,7 @@ function renderGrid() {
       </div>
     </div>`;
   }).join('');
+  bindCardDnD();
 }
 
 async function doAction(name, action) {
