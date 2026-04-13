@@ -640,6 +640,7 @@ async function deployApp(appName) {
 
         const info = await pm2Info(appName);
         const wppMsg = `✅ *Deploy OK* — ${appName}\n📅 ${now()}\n${'━'.repeat(25)}\n\n` +
+          `📱 *App:* ${appName}\n` +
           `📂 *Modo:* Alterações locais\n` +
           `🌿 *Branch:* ${branch}\n` +
           `🔄 *Commit:* \`${commitAfter}\`\n` +
@@ -730,6 +731,7 @@ async function deployApp(appName) {
         const commitLog = changed ? git(`log ${commitBefore}..${commitAfter} --format=%h %s`, gitRoot) : null;
         const commitLines = commitLog ? commitLog.split('\n').filter(Boolean).slice(0, 5) : [];
         const wppMsg = `✅ *Deploy OK* — ${appName}\n📅 ${now()}\n${'━'.repeat(25)}\n\n` +
+          `📱 *App:* ${appName}\n` +
           `📂 *Modo:* Atualização remota\n` +
           `🌿 *Branch:* ${branch}\n` +
           (changed
@@ -759,6 +761,7 @@ async function deployApp(appName) {
       log('deploy', '━━━ DEPLOY OK (sem git) ━━━');
       const info = await pm2Info(appName);
       const wppMsg = `✅ *Deploy OK* — ${appName}\n📅 ${now()}\n${'━'.repeat(25)}\n\n` +
+        `📱 *App:* ${appName}\n` +
         `📂 *Modo:* Sem git (restart)\n` +
         `✅ Dependências instaladas e processo reiniciado com sucesso` +
         (info ? `\n\n📊 *Status:* ${info.status} | PID ${info.pid}\n💾 *Memória:* ${info.mem}MB | ⚡ CPU: ${info.cpu}%` : '');
