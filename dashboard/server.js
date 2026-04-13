@@ -350,6 +350,17 @@ function bufferLog(appName, source, text) {
   }
 }
 
+function getLatestErrorFromBuffer(appName) {
+  const list = logBuffers[appName] || [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    const entry = list[i];
+    if (isPotentialErrorLine(entry.source, entry.text)) {
+      return entry.text;
+    }
+  }
+  return null;
+}
+
 let _pm2Connected = null;
 function ensurePm2() {
   if (_pm2Connected) return _pm2Connected;
@@ -1279,10 +1290,15 @@ app.get('/api/apps/:name/error-detail', (req, res) => {
   const recent = errorHistory.filter(item => item.app === name).slice(0, 12);
   const runtime = getRuntimeAlert(name);
   const deployErr = deployHistory.find(item => item.app === name && item.status === 'error');
+  const fromBuffer = getLatestErrorFromBuffer(name);
+  const pm2ErrorTail = readPm2ErrorLog(name, 80);
+  const latestFullDetail = pm2ErrorTail || latest?.detail || fromBuffer || runtime?.reason || pollErrors[name] || (deployErr ? deployErr.detail : null) || null;
 
   res.json({
     app: name,
     latest,
+    latestFullDetail,
+    pm2ErrorTail,
     runtimeAlert: runtime,
     gitError: pollErrors[name] || null,
     deployError: deployErr ? deployErr.detail : null,

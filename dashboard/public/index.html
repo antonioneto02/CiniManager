@@ -1181,13 +1181,13 @@ async function openErrorModal(name) {
   try {
     const data = await api('GET', `/api/apps/${name}/error-detail`);
     const recent = data.recent || [];
-    const latestDetail = data.latest?.detail || data.runtimeAlert?.reason || data.gitError || data.deployError || 'Sem detalhe disponível.';
+    const latestDetail = data.latestFullDetail || data.latest?.detail || data.runtimeAlert?.reason || data.gitError || data.deployError || 'Sem detalhe disponível.';
     document.getElementById('error-body').innerHTML = `
       <div class="section">
         <div class="section-title">Erro atual</div>
         <div class="h-item h-runtime">
           <div class="h-app">${esc(displayName(name))}</div>
-          <div class="h-detail">${esc(latestDetail)}</div>
+          <pre style="white-space:pre-wrap;word-break:break-word;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px;font-size:12px;line-height:1.6;margin-top:6px">${esc(latestDetail)}</pre>
           <div class="h-time">${esc(data.latest?.time || '')}</div>
         </div>
       </div>
