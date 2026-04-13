@@ -178,6 +178,41 @@ function normalizeErrorSignature(text) {
     .slice(0, 180);
 }
 
+function classifyLogAlert(text) {
+  const content = String(text || '').toLowerCase();
+  if (!content) return 'empty';
+
+  if (/sess[aã]o expirada|fa[çc]a login novamente|status code 401|\b401\b|unauthorized/.test(content)) {
+    return 'auth-session-expired';
+  }
+  if (/status code 403|\b403\b|forbidden/.test(content)) {
+    return 'auth-forbidden';
+  }
+  if (/status code 404|\b404\b|not found/.test(content)) {
+    return 'http-404';
+  }
+  if (/status code 5\d\d|\b5\d\d\b/.test(content)) {
+    return 'http-5xx';
+  }
+  if (/axioserror/.test(content)) {
+    const statusMatch = content.match(/status code\s*(\d{3})/);
+    if (statusMatch) return `axios-status-${statusMatch[1]}`;
+  }
+  if (/econnrefused|refused/.test(content)) return 'network-refused';
+  if (/etimedout|timeout/.test(content)) return 'network-timeout';
+  if (/enoent/.test(content)) return 'file-not-found';
+  if (/database|sql/.test(content) && /error|failed|timeout|exception/.test(content)) return 'database-error';
+
+  return normalizeErrorSignature(
+    content
+      .replace(/ at .*$/g, '')
+      .replace(/[a-z]:\\[^\s)]+/gi, 'path')
+      .replace(/\([^)]*\)/g, '')
+      .replace(/"[^"]+"/g, '"text"')
+      .replace(/'[^']+'/g, "'text'")
+  );
+}
+
 function isPotentialErrorLine(source, text) {
   const content = String(text || '').trim();
   if (!content) return false;
@@ -190,7 +225,7 @@ function isPotentialErrorLine(source, text) {
 async function notifyAppLogError(appName, source, text) {
   if (!isPotentialErrorLine(source, text)) return;
 
-  const signature = `${appName}:${source}:${normalizeErrorSignature(text)}`;
+  const signature = `${appName}:${source}:${classifyLogAlert(text)}`;
   const lastSent = logAlertThrottle.get(signature) || 0;
   if (Date.now() - lastSent < LOG_ALERT_WINDOW_MS) return;
   logAlertThrottle.set(signature, Date.now());
@@ -1111,6 +1146,7 @@ setTimeout(async () => {
 
 const KNOWN_PORTS = {
   'client-baixas-pix':    5001,
+  'portal-consultas':     3000,
   'portal-streamlit':     8501,
   'gerenciador-cargas':   8502,
   'central-notificacoes': 5000,
