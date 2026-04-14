@@ -992,6 +992,11 @@ function startBus() {
 }
 startBus();
 
+// Periodicamente busca novos erros no DB e notifica clientes SSE (captura inserts externos)
+setInterval(() => {
+  try { pushErrorHistory(); } catch (e) { console.error('[poll-errors-db] erro:', e.message); }
+}, 5000);
+
 function pm2Do(action, target) {
   return ensurePm2().then(() => new Promise((resolve, reject) => {
     pm2[action](target, (err) => {
@@ -1830,6 +1835,24 @@ function readAppPort(appName) {
 
 app.get('/api/apps', async (req, res) => {
   try {
+    // buscar último erro não-visto por app direto do DB
+    const latestUnseen = await (async () => {
+      try {
+        const pool = await getPool();
+        const q = await pool.request().query(`
+          SELECT APLICACAO, DETALHE, DTVISTO, FORMAT(DTINC, 'dd/MM/yyyy HH:mm:ss') AS TEMPO
+          FROM dbo.CINI_MANAGER_ERRO_HISTORICO
+          WHERE DTVISTO IS NULL
+          ORDER BY ID_ERRO DESC
+        `);
+        const map = new Map();
+        for (const r of q.recordset) {
+          if (!map.has(r.APLICACAO)) map.set(r.APLICACAO, { detail: r.DETALHE || '', time: r.TEMPO });
+        }
+        return map;
+      } catch (e) { return new Map(); }
+    })();
+
     const list = await pm2List();
     const HIDE = new Set(['log-watcher']);
     const filtered = sortAppsByCardOrder(list.filter(p => !p.name.startsWith('pm2-') && !HIDE.has(p.name)));
@@ -1844,9 +1867,12 @@ app.get('/api/apps', async (req, res) => {
       const gitError = pollErrors[p.name] || null;
       const runtimeAlert = getRuntimeAlert(p.name);
       const runtimeError = runtimeAlert?.reason || null;
+      // prefer DB unseen error if present (exact payload saved in DB)
+      const dbUnseen = latestUnseen.get(p.name);
+      const dbError = dbUnseen ? dbUnseen.detail : null;
       const deployError = status !== 'online' ? (lastErrors.get(p.name)?.detail || null) : null;
-      let attentionReason = gitError || runtimeError || deployError;
-      let attentionType = gitError ? 'git' : (runtimeError ? 'runtime' : (deployError ? 'deploy' : null));
+      let attentionReason = dbError || gitError || runtimeError || deployError;
+      let attentionType = dbError ? 'runtime' : (gitError ? 'git' : (runtimeError ? 'runtime' : (deployError ? 'deploy' : null)));
 
       const alertTs = Math.max(pollErrorAt[p.name] || 0, runtimeAlert?.ts || 0);
       const ackTs = acknowledgedAlertAt.get(p.name) || 0;
