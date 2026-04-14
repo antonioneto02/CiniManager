@@ -1867,12 +1867,10 @@ app.get('/api/apps', async (req, res) => {
       const gitError = pollErrors[p.name] || null;
       const runtimeAlert = getRuntimeAlert(p.name);
       const runtimeError = runtimeAlert?.reason || null;
-      // prefer DB unseen error if present (exact payload saved in DB)
       const dbUnseen = latestUnseen.get(p.name);
       const dbError = dbUnseen ? dbUnseen.detail : null;
-      const deployError = status !== 'online' ? (lastErrors.get(p.name)?.detail || null) : null;
-      let attentionReason = dbError || gitError || runtimeError || deployError;
-      let attentionType = dbError ? 'runtime' : (gitError ? 'git' : (runtimeError ? 'runtime' : (deployError ? 'deploy' : null)));
+      let attentionReason = dbError || null;
+      let attentionType = dbError ? 'runtime' : null;
 
       const alertTs = Math.max(pollErrorAt[p.name] || 0, runtimeAlert?.ts || 0);
       const ackTs = acknowledgedAlertAt.get(p.name) || 0;
