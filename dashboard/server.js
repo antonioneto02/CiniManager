@@ -1971,28 +1971,38 @@ app.post('/api/apps/:name/:action', async (req, res) => {
   }
 });
 
-app.post('/api/apps/:name/ack-errors', (req, res) => {
+app.post('/api/apps/:name/ack-errors', async (req, res) => {
   const { name } = req.params;
   console.log(`[ack] recebido para app="${name}", no registry=${!!APP_REGISTRY[name]}`);
-  if (!APP_REGISTRY[name]) {
-    console.warn(`[ack] app "${name}" não está no APP_REGISTRY — atualizando só o DB mesmo assim`);
-    ackErrorsInDB(name);
-    acknowledgedAlertAt.set(name, Date.now());
-    errorHistory.filter(e => e.app === name && !e.seen).forEach(e => { e.seen = true; });
+  try {
+    // limpar runtime/poll alerts localmente
+    runtimeAlerts.delete(name);
+    delete pollErrors[name];
+    delete pollErrorAt[name];
+
+    // atualizar DB e aguardar conclusão
+    await ackErrorsInDB(name);
+
+    // atualizar timestamp de acknowledged a partir do DB (ultima DTVISTO)
+    try {
+      const pool = await getPool();
+      const r = await pool.request().input('aplicacao', sql.NVarChar(100), name).query(`
+        SELECT MAX(DTVISTO) AS ULTIMA FROM dbo.CINI_MANAGER_ERRO_HISTORICO WHERE APLICACAO = @aplicacao
+      `);
+      const last = r.recordset[0]?.ULTIMA;
+      if (last) acknowledgedAlertAt.set(name, new Date(last).getTime());
+      else acknowledgedAlertAt.set(name, Date.now());
+    } catch (e) {
+      acknowledgedAlertAt.set(name, Date.now());
+    }
+
+    // notificar clientes SSE com dados frescos do DB
     pushErrorHistory();
     return res.json({ ok: true, app: name, cleared: true });
+  } catch (e) {
+    console.error('[ack-errors] erro:', e.message);
+    return res.status(500).json({ error: e.message });
   }
-
-  acknowledgedAlertAt.set(name, Date.now());
-  runtimeAlerts.delete(name);
-  delete pollErrors[name];
-  delete pollErrorAt[name];
-
-  errorHistory.filter(e => e.app === name && !e.seen).forEach(e => { e.seen = true; });
-  pushErrorHistory();
-  ackErrorsInDB(name);
-
-  res.json({ ok: true, app: name, cleared: true });
 });
 
 app.post('/api/apps/reset-restarts', async (req, res) => {
