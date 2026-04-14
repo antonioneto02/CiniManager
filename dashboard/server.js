@@ -251,6 +251,12 @@ app.use((req, res, next) => {
   if (req.path === '/loginPage' || req.path === '/login' || req.path === '/logout' || req.path === '/Cini.png') {
     return next();
   }
+  if (req.path.startsWith('/api/bot/')) {
+    return next(); // autenticado por token em botAuthMiddleware
+  }
+  if (req.path.startsWith('/api/webhook/')) {
+    return next(); // autenticado por token no próprio handler
+  }
   return ensureAuth(req, res, next);
 });
 
@@ -281,6 +287,8 @@ const APP_REGISTRY = {
 
 const DEPLOY_EXCLUDE    = new Set(['log-watcher']);
 const STAGED_DEPLOY_APPS = new Set(['cini-dashboard']); 
+// apps to exclude from notification messages and summaries
+const NOTIFY_EXCLUDE = new Set(['log-watcher', 'cini-dashboard']);
 const AUTOPOLL_FILE = path.join(__dirname, '.autopoll.json');
 const CARD_ORDER_FILE = path.join(__dirname, '.card-order.json');
 const DISPLAY_NAMES = {
@@ -336,7 +344,9 @@ function saveCardOrder() {
 let autoPollCfg = loadAutoPoll();
 let cardOrder = loadCardOrder();
 
-const WPP_DEST = '554188529918';
+const WPP_DEST       = '554188529918';
+const CINI_BOT_TOKEN = process.env.CINI_BOT_TOKEN || '';
+const BOT_API_URL    = process.env.BOT_API_URL    || 'http://localhost:3001';
 const DB_CFG   = {
   server:   'localhost',
   database: 'dw',
@@ -526,6 +536,54 @@ async function deleteServiceGroup(groupId) {
   }
 }
 
+async function updateServiceGroup(groupId, apps) {
+  const id = Number(groupId);
+  if (!Number.isFinite(id) || id <= 0) throw new Error('Grupo inválido');
+
+  const validApps = Object.keys(APP_REGISTRY).filter(x => !DEPLOY_EXCLUDE.has(x));
+  const selectedApps = [...new Set((Array.isArray(apps) ? apps : []).map(a => String(a || '').trim()).filter(a => validApps.includes(a)))];
+  if (!selectedApps.length) throw new Error('Selecione ao menos um serviço para o grupo');
+
+  const p = await getGroupsPool();
+  const tx = new sql.Transaction(p);
+  await tx.begin();
+  try {
+    const checkReq = new sql.Request(tx);
+    checkReq.input('idGrupo', sql.Int, id);
+    const check = await checkReq.query(`
+      SELECT TOP 1 ID_GRUPO, NOME_GRUPO
+      FROM dbo.CINI_MANAGER_GRUPOS
+      WHERE ID_GRUPO = @idGrupo
+        AND ATIVO = 1
+    `);
+    if (!(check.recordset || []).length) throw new Error('Grupo não encontrado');
+    const delReq = new sql.Request(tx);
+    delReq.input('idGrupo', sql.Int, id);
+    await delReq.query(`
+      DELETE FROM dbo.CINI_MANAGER_GRUPOS_APPS
+      WHERE ID_GRUPO = @idGrupo
+    `);
+    
+    for (let i = 0; i < selectedApps.length; i++) {
+      const appName = selectedApps[i];
+      const appReq = new sql.Request(tx);
+      appReq.input('idGrupo', sql.Int, id);
+      appReq.input('appName', sql.NVarChar(120), appName);
+      appReq.input('ordem', sql.Int, i + 1);
+      await appReq.query(`
+        INSERT INTO dbo.CINI_MANAGER_GRUPOS_APPS (ID_GRUPO, APP_NAME, ORDEM, DTINC)
+        VALUES (@idGrupo, @appName, @ordem, GETDATE())
+      `);
+    }
+
+    await tx.commit();
+    return { id, name: String(check.recordset[0].NOME_GRUPO || '').trim(), apps: selectedApps };
+  } catch (err) {
+    try { await tx.rollback(); } catch {}
+    throw err;
+  }
+}
+
 async function sendWhatsApp(msg) {
   try {
     const p = await getPool();
@@ -548,17 +606,40 @@ function trimText(text, max = 500) {
 
 async function notifyWhatsApp(title, lines = []) {
   const body = lines.filter(Boolean).join('\n');
+  const signature = normalizeErrorSignature(`${title} ${body}`);
+  const last = recentNotifications.get(signature) || 0;
+  if (Date.now() - last < NOTIFY_DUP_WINDOW_MS) {
+    console.log(`[notify] supressing duplicate notification: ${signature}`);
+    return;
+  }
+  recentNotifications.set(signature, Date.now());
   const msg = `${title}\n📅 ${now()}\n${'━'.repeat(25)}\n\n${body}`;
   await sendWhatsApp(msg);
+}
+
+async function setBotAdminPending(type, app, question) {
+  if (!CINI_BOT_TOKEN || !BOT_API_URL) return;
+  try {
+    await axios.post(`${BOT_API_URL}/admin-action-pending`, {
+      token: CINI_BOT_TOKEN,
+      type,
+      app,
+      question,
+    }, { timeout: 3000 });
+  } catch (e) {
+    console.warn('[bot-pending] Não foi possível notificar bot:', e.message);
+  }
 }
 
 const runtimeAlerts = new Map();
 const acknowledgedAlertAt = new Map();
 const logAlertThrottle = new Map();
 const gitAlertThrottle = new Map();
-const APP_ERROR_DUP_WINDOW_MS = 1000;
-const GIT_ALERT_DUP_WINDOW_MS = 1000;
-const PM2_EVENT_DUP_WINDOW_MS = 1000;
+const recentNotifications = new Map();
+const NOTIFY_DUP_WINDOW_MS = 5 * 60 * 1000; 
+const APP_ERROR_DUP_WINDOW_MS = 5 * 60 * 1000;  // 5 min
+const GIT_ALERT_DUP_WINDOW_MS = 5 * 60 * 1000;  // 5 min
+const PM2_EVENT_DUP_WINDOW_MS = 5 * 60 * 1000;  // 5 min
 const ALERT_VISIBLE_MS = 6 * 60 * 60 * 1000;
 const LOG_ERROR_PATTERNS = [
   /(^|\b)(error|exception|fatal|traceback|unhandled|failed|failure|critical|panic)(\b|:)/i,
@@ -589,6 +670,12 @@ const LOG_ERROR_IGNORE_PATTERNS = [
   /not\s+designed\s+for\s+a\s+production\s+environment/i,
   /will\s+leak\s+memory/i,
   /will\s+not\s+scale\s+past\s+a\s+single\s+process/i,
+  // linhas suplementares — complementam o erro anterior, não geram alerta próprio
+  /resposta completa:/i,
+  /stack trace:/i,
+  /traceback \(most recent call last\)/i,
+  /^\s+at\s+/i,
+  /^\s+File\s+".*",\s+line\s+\d+/i,
 ];
 
 function rememberRuntimeAlert(appName, type, reason) {
@@ -678,13 +765,16 @@ async function notifyAppLogError(appName, source, text) {
   });
   const recent = (logBuffers[appName] || []).slice(-6).map(entry => `${entry.source}: ${trimText(entry.text, 180)}`);
   await notifyWhatsApp(`🔴 Erro da aplicação — ${appLabel(appName)}`, [
-    `📱 App: ${appName}`,
+    `📱 App: ${appLabel(appName)}`,
     `📌 Origem: ${source}`,
     `⚠️ Linha: ${trimText(text, 260)}`,
     recent.length ? '' : null,
     recent.length ? '📄 Últimas linhas:' : null,
     recent.length ? recent.join('\n') : null,
+    '',
+    `_Responda *visto ${appName}* para marcar como visto_`,
   ]);
+  setBotAdminPending('ask_ack', appName, `Deseja marcar os erros de *${appLabel(appName)}* como vistos?`).catch(() => {});
 }
 
 async function notifyGitPollError(appName, message) {
@@ -701,7 +791,7 @@ async function notifyGitPollError(appName, message) {
     detail: message,
   });
   await notifyWhatsApp(`⛔ Falha Git/Polling — ${appLabel(appName)}`, [
-    `📱 App: ${appName}`,
+    `📱 App: ${appLabel(appName)}`,
     `⚠️ Erro: ${trimText(message, 300)}`,
   ]);
 }
@@ -724,7 +814,7 @@ async function notifyPm2EventError(appName, event) {
     detail: `evento PM2: ${event}`,
   });
   await notifyWhatsApp(`🔴 Evento crítico PM2 — ${appLabel(appName)}`, [
-    `📱 App: ${appName}`,
+    `📱 App: ${appLabel(appName)}`,
     `⚠️ Evento: ${event}`,
   ]);
 }
@@ -800,6 +890,7 @@ async function fetchErrorsFromDB() {
 }
 
 function addDeployHistory(rec) {
+  rec.label = appLabel(rec.app);
   deployHistory.unshift(rec);
   if (deployHistory.length > 100) deployHistory.pop();
   pushHistory();
@@ -846,7 +937,6 @@ function addErrorHistory(entry) {
                 VALUES (@aplicacao, @tipo, @origem, @detalhe, @resumo, GETDATE())`);
     } catch (e) {
       console.error('[db] addErrorHistory ERRO:', e.message);
-      // remove da memória para não mostrar o que não foi salvo no banco
       const idx = errorHistory.indexOf(rec);
       if (idx !== -1) errorHistory.splice(idx, 1);
       pushErrorHistory();
@@ -884,7 +974,9 @@ async function loadHistoriesFromDB() {
     `);
     deployHistory.length = 0;
     for (const r of dRes.recordset) {
-      deployHistory.push({ time: r.TEMPO, app: r.APLICACAO, status: r.STATUS, detail: r.DETALHE || '' });
+      const rec = { time: r.TEMPO, app: r.APLICACAO, status: r.STATUS, detail: r.DETALHE || '' };
+      rec.label = appLabel(rec.app);
+      deployHistory.push(rec);
     }
 
     const eRes = await pool.request().query(`
@@ -897,7 +989,7 @@ async function loadHistoriesFromDB() {
     errorHistory.length = 0;
     errorSeq = 0;
     for (const r of eRes.recordset) {
-      errorHistory.push({
+      const rec = {
         id:      ++errorSeq,
         time:    r.TEMPO,
         app:     r.APLICACAO,
@@ -906,10 +998,11 @@ async function loadHistoriesFromDB() {
         detail:  r.DETALHE || '',
         preview: r.RESUMO  || trimText(r.DETALHE || '', 170),
         seen:    !!r.DTVISTO,
-      });
+      };
+      rec.label = appLabel(rec.app);
+      errorHistory.push(rec);
     }
 
-    // Restaurar acknowledgedAlertAt a partir da ultima confirmacao por app
     const ackRes = await pool.request().query(`
       SELECT APLICACAO, MAX(DTVISTO) AS ULTIMA_CONFIRMACAO
       FROM   dbo.CINI_MANAGER_ERRO_HISTORICO
@@ -991,8 +1084,6 @@ function startBus() {
   }).catch(() => setTimeout(startBus, 5000));
 }
 startBus();
-
-// Periodicamente busca novos erros no DB e notifica clientes SSE (captura inserts externos)
 setInterval(() => {
   try { pushErrorHistory(); } catch (e) { console.error('[poll-errors-db] erro:', e.message); }
 }, 5000);
@@ -1386,6 +1477,10 @@ function getUnpushedCommits(cwd) {
 function installDeps(cwd, cwdWin, log) {
   if (fs.existsSync(path.join(cwdWin, 'package.json'))) {
     log('deploy', 'npm install --omit=dev...');
+    const pkgLock = path.join(cwdWin, 'node_modules', '.package-lock.json');
+    if (fs.existsSync(pkgLock)) {
+      try { fs.unlinkSync(pkgLock); } catch (_) {}
+    }
     try {
       const out = execSync('npm install --omit=dev', { cwd, encoding: 'utf8', timeout: 120000 });
       log('deploy', out.trim() || 'concluído');
@@ -1490,8 +1585,8 @@ async function deployApp(appName) {
         log('deploy', `━━━ DEPLOY OK — alterações publicadas (${commitAfter}) ━━━`);
 
         const info = await pm2Info(appName);
-        const wppMsg = `✅ *Deploy OK* — ${appName}\n📅 ${now()}\n${'━'.repeat(25)}\n\n` +
-          `📱 *App:* ${appName}\n` +
+        const wppMsg = `✅ *Deploy OK* — ${appLabel(appName)}\n📅 ${now()}\n${'━'.repeat(25)}\n\n` +
+          `📱 *App:* ${appLabel(appName)}\n` +
           `📂 *Modo:* Alterações locais\n` +
           `🌿 *Branch:* ${branch}\n` +
           `🔄 *Commit:* \`${commitAfter}\`\n` +
@@ -1554,7 +1649,7 @@ async function deployApp(appName) {
 
           const errLogs = readPm2ErrorLog(appName, 10);
           const rollbackInfo = await pm2Info(appName);
-          const rollbackWpp = `❌ *Deploy FALHOU* — ${appName}\n📅 ${now()}\n${'━'.repeat(25)}\n\n` +
+          const rollbackWpp = `❌ *Deploy FALHOU* — ${appLabel(appName)}\n📅 ${now()}\n${'━'.repeat(25)}\n\n` +
             `📂 *Modo:* Atualização remota\n` +
             `🌿 *Branch:* ${branch}\n` +
             `🔄 *Commits:* \`${commitBefore}\` → \`${commitAfter}\`\n\n` +
@@ -1577,8 +1672,8 @@ async function deployApp(appName) {
         const info = await pm2Info(appName);
         const commitLog = changed ? git(`log ${commitBefore}..${commitAfter} --format=%h %s`, gitRoot) : null;
         const commitLines = commitLog ? commitLog.split('\n').filter(Boolean).slice(0, 5) : [];
-        const wppMsg = `✅ *Deploy OK* — ${appName}\n📅 ${now()}\n${'━'.repeat(25)}\n\n` +
-          `📱 *App:* ${appName}\n` +
+        const wppMsg = `✅ *Deploy OK* — ${appLabel(appName)}\n📅 ${now()}\n${'━'.repeat(25)}\n\n` +
+          `📱 *App:* ${appLabel(appName)}\n` +
           `📂 *Modo:* Atualização remota\n` +
           `🌿 *Branch:* ${branch}\n` +
           (changed
@@ -1605,8 +1700,8 @@ async function deployApp(appName) {
 
       log('deploy', '━━━ DEPLOY OK (sem git) ━━━');
       const info = await pm2Info(appName);
-      const wppMsg = `✅ *Deploy OK* — ${appName}\n📅 ${now()}\n${'━'.repeat(25)}\n\n` +
-        `📱 *App:* ${appName}\n` +
+      const wppMsg = `✅ *Deploy OK* — ${appLabel(appName)}\n📅 ${now()}\n${'━'.repeat(25)}\n\n` +
+      `📱 *App:* ${appLabel(appName)}\n` +
         `📂 *Modo:* Sem git (restart)\n` +
         `✅ Dependências instaladas e processo reiniciado com sucesso` +
         (info ? `\n\n📊 *Status:* ${info.status} | PID ${info.pid}\n💾 *Memória:* ${info.mem}MB | ⚡ CPU: ${info.cpu}%` : '');
@@ -1623,12 +1718,13 @@ async function deployApp(appName) {
     const gitRoot2 = findGitRoot(cwd);
     const failBranch = gitRoot2 ? git('rev-parse --abbrev-ref HEAD', gitRoot2) : null;
     const failHash = gitRoot2 ? git('rev-parse --short HEAD', gitRoot2) : null;
-    const wppMsg = `❌ *Deploy FALHOU* — ${appName}\n📅 ${now()}\n${'━'.repeat(25)}\n\n` +
+    const wppMsg = `❌ *Deploy FALHOU* — ${appLabel(appName)}\n📅 ${now()}\n${'━'.repeat(25)}\n\n` +
       (failBranch ? `🌿 *Branch:* ${failBranch}\n` : '') +
       (failHash ? `🔄 *Commit:* \`${failHash}\`\n` : '') +
       `\n⚠️ *Erro:* ${err.message}` +
       (failInfo ? `\n\n📊 *Status:* ${failInfo.status} | Restarts: ${failInfo.restarts}\n💾 Memória: ${failInfo.mem}MB` : '') +
-      (errLogs ? `\n\n🔴 *Últimos erros do processo:*\n\`\`\`\n${errLogs}\n\`\`\`` : '');
+      (errLogs ? `\n\n🔴 *Últimos erros do processo:*\n\`\`\`\n${errLogs}\n\`\`\`` : '') +
+      `\n\n_Responda *restart ${appName}* para tentar reiniciar_`;
     addErrorHistory({
       time: now(),
       app: appName,
@@ -1637,6 +1733,7 @@ async function deployApp(appName) {
       detail: err.message,
     });
     await sendWhatsApp(wppMsg);
+    setBotAdminPending('ask_restart', appName, `Deseja reiniciar *${appLabel(appName)}* após a falha no deploy?`).catch(() => {});
     const rec = { time: now(), app: appName, status: 'error', detail: err.message };
     addDeployHistory(rec);
     throw err;
@@ -1649,24 +1746,29 @@ async function deployApp(appName) {
 async function sendSummary() {
   try {
     const list  = await pm2List();
-    const apps  = list.filter(p => !p.name.startsWith('pm2-'));
-    const total = apps.length;
-    const ok    = apps.filter(p => p.pm2_env.status === 'online').length;
-    const down  = apps.filter(p => p.pm2_env.status !== 'online');
+    const apps  = list.filter(p => !p.name.startsWith('pm2-') && !NOTIFY_EXCLUDE.has(p.name));
+    const sorted = sortAppsByCardOrder(apps);
+    const total = sorted.length;
+    const ok    = sorted.filter(p => p.pm2_env.status === 'online').length;
+    const down  = sorted.filter(p => p.pm2_env.status !== 'online');
     const ts    = now();
 
     let msg = `📊 *Resumo dos Apps*\n📅 ${ts}\n${'━'.repeat(25)}\n\n`;
     msg += `✅ ${ok}/${total} online`;
-    if (down.length) msg += ` | ❌ OFFLINE: ${down.map(p => p.name).join(', ')}`;
+    if (down.length) msg += ` | ❌ OFFLINE: ${down.map(p => appLabel(p.name)).join(', ')}`;
     msg += '\n\n';
 
-    for (const p of apps) {
+    for (let i = 0; i < sorted.length; i++) {
+      const p = sorted[i];
+      const idx = i + 1;
       const st   = p.pm2_env.status === 'online';
       const mem  = Math.round((p.monit?.memory ?? 0) / 1024 / 1024);
       const upMs = st ? Date.now() - p.pm2_env.pm_uptime : 0;
       const upH  = Math.floor(upMs / 3_600_000);
       const upM  = Math.floor((upMs % 3_600_000) / 60_000);
-      msg += `${st ? '🟢' : '🔴'} *${p.name}*`;
+      const port = readAppPort(p.name);
+      msg += `${idx}. ${st ? '🟢' : '🔴'} *${appLabel(p.name)}*`;
+      if (port) msg += ` [:${port}]`;
       if (st)  msg += ` — ${mem}MB — up ${upH}h${upM}m`;
       if (p.pm2_env.restart_time > 0) msg += ` ⚠️ ${p.pm2_env.restart_time} restart(s)`;
       msg += '\n';
@@ -1747,7 +1849,7 @@ async function pollGitUpdates() {
       bufferLog(appName, 'deploy', `🔔 Auto-deploy: ${pending.length} commit(s) novo(s) detectado(s) no remoto`);
 
       await sendWhatsApp(
-        `🔔 *Atualização detectada*\n📦 ${appName} (${branch})\n` +
+        `🔔 *Atualização detectada*\n📦 ${appLabel(appName)} (${branch})\n` +
         `📊 ${pending.length} commit(s) novo(s)\n` +
         (commitList ? `\n📝 Commits:\n${commitList}\n` : '') +
         `\n⏳ Iniciando auto-deploy...`
@@ -1835,7 +1937,6 @@ function readAppPort(appName) {
 
 app.get('/api/apps', async (req, res) => {
   try {
-    // buscar último erro não-visto por app direto do DB
     const latestUnseen = await (async () => {
       try {
         const pool = await getPool();
@@ -1854,8 +1955,7 @@ app.get('/api/apps', async (req, res) => {
     })();
 
     const list = await pm2List();
-    const HIDE = new Set(['log-watcher']);
-    const filtered = sortAppsByCardOrder(list.filter(p => !p.name.startsWith('pm2-') && !HIDE.has(p.name)));
+    const filtered = sortAppsByCardOrder(list.filter(p => !p.name.startsWith('pm2-') && !NOTIFY_EXCLUDE.has(p.name)));
     const commits = await Promise.all(filtered.map(p => getLastCommit(p.name).catch(() => null)));
     const lastErrors = new Map();
     for (const item of deployHistory) {
@@ -1946,40 +2046,14 @@ app.get('/api/apps/:name/error-detail', (req, res) => {
   })();
 });
 
-app.post('/api/apps/:name/:action(start|stop|restart)', async (req, res) => {
-  const { name, action } = req.params;
-  try {
-    await pm2Do(action, name);
-    if (['restart','stop','start'].includes(action)) {
-      addDeployHistory({ time: now(), app: name, status: 'ok', detail: action });
-    }
-    await notifyWhatsApp(`✅ Ação executada — ${appLabel(name)}`, [
-      `📱 App: ${name}`,
-      `🔧 Ação: ${action}`,
-      `📌 Origem: dashboard`,
-    ]);
-    res.json({ ok: true });
-  } catch (e) {
-    const wppMsg = `❌ *Ação falhou* — ${name}\n🔧 ${action}\n📅 ${now()}\n\n⚠️ ${e.message}`;
-    sendWhatsApp(wppMsg);
-    addDeployHistory({ time: now(), app: name, status: 'error', detail: `${action} falhou: ${e.message}` });
-    res.status(500).json({ error: e.message });
-  }
-});
-
 app.post('/api/apps/:name/ack-errors', async (req, res) => {
   const { name } = req.params;
   console.log(`[ack] recebido para app="${name}", no registry=${!!APP_REGISTRY[name]}`);
   try {
-    // limpar runtime/poll alerts localmente
     runtimeAlerts.delete(name);
     delete pollErrors[name];
     delete pollErrorAt[name];
-
-    // atualizar DB e aguardar conclusão
     await ackErrorsInDB(name);
-
-    // atualizar timestamp de acknowledged a partir do DB (ultima DTVISTO)
     try {
       const pool = await getPool();
       const r = await pool.request().input('aplicacao', sql.NVarChar(100), name).query(`
@@ -1992,12 +2066,32 @@ app.post('/api/apps/:name/ack-errors', async (req, res) => {
       acknowledgedAlertAt.set(name, Date.now());
     }
 
-    // notificar clientes SSE com dados frescos do DB
     pushErrorHistory();
     return res.json({ ok: true, app: name, cleared: true });
   } catch (e) {
     console.error('[ack-errors] erro:', e.message);
     return res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/apps/:name/:action(start|stop|restart)', async (req, res) => {
+  const { name, action } = req.params;
+  try {
+    await pm2Do(action, name);
+    if (['restart','stop','start'].includes(action)) {
+      addDeployHistory({ time: now(), app: name, status: 'ok', detail: action });
+    }
+    await notifyWhatsApp(`✅ Ação executada — ${appLabel(name)}`, [
+      `📱 App: ${appLabel(name)}`,
+      `🔧 Ação: ${action}`,
+      `📌 Origem: dashboard`,
+    ]);
+    res.json({ ok: true });
+  } catch (e) {
+    const wppMsg = `❌ *Ação falhou* — ${appLabel(name)}\n🔧 ${action}\n📅 ${now()}\n\n⚠️ ${e.message}`;
+    sendWhatsApp(wppMsg);
+    addDeployHistory({ time: now(), app: name, status: 'error', detail: `${action} falhou: ${e.message}` });
+    res.status(500).json({ error: e.message });
   }
 });
 
@@ -2106,7 +2200,6 @@ app.get('/api/apps/:name/deploy-check', (req, res) => {
   const branch          = git('rev-parse --abbrev-ref HEAD', gitRoot) || 'main';
   const pendingRaw      = git(`log HEAD..origin/${branch} --format=%h|||%s`, gitRoot);
   const remotePending   = pendingRaw ? pendingRaw.split('\n').filter(Boolean).map(l => { const [h, s] = l.split('|||'); return { hash: h, subject: s }; }) : [];
-
   const hasLocal  = localChanges.length > 0 || unpushedCommits.length > 0;
   const mode      = hasLocal ? 'local-changes' : (remotePending.length > 0 ? 'remote-updates' : 'up-to-date');
 
@@ -2150,14 +2243,14 @@ app.post('/api/apps/:name/pull', async (req, res) => {
   const out = git('pull', gitRoot);
   if (out === null) {
     await notifyWhatsApp(`❌ Git pull falhou — ${appLabel(name)}`, [
-      `📱 App: ${name}`,
+      `📱 App: ${appLabel(name)}`,
       '📌 Origem: dashboard',
       '⚠️ Erro: git pull falhou',
     ]);
     return res.status(500).json({ error: 'git pull falhou' });
   }
   await notifyWhatsApp(`⬇ Git pull executado — ${appLabel(name)}`, [
-    `📱 App: ${name}`,
+    `📱 App: ${appLabel(name)}`,
     '📌 Origem: dashboard',
     `📝 Resultado: ${trimText(out || 'sem mudanças', 250)}`,
   ]);
@@ -2336,7 +2429,7 @@ app.get('/api/errors-history/:id', (req, res) => {
 app.get('/api/status', async (req, res) => {
   try {
     const list  = await pm2List();
-    const apps  = list.filter(p => !p.name.startsWith('pm2-'));
+    const apps  = list.filter(p => !p.name.startsWith('pm2-') && !NOTIFY_EXCLUDE.has(p.name));
     const total = apps.length;
     const ok    = apps.filter(p => p.pm2_env.status === 'online').length;
     res.json({ total, online: ok, offline: total - ok, time: now() });
@@ -2419,6 +2512,20 @@ app.delete('/api/groups/:id', async (req, res) => {
   }
 });
 
+app.put('/api/groups/:id', async (req, res) => {
+  try {
+    const updated = await updateServiceGroup(req.params.id, req.body?.apps);
+    await notifyWhatsApp('✏️ Grupo atualizado no dashboard', [
+      `📛 Grupo: ${updated.name}`,
+      `📱 Serviços: ${updated.apps.map(appLabel).join(', ')}`,
+      '📌 Origem: dashboard',
+    ]);
+    res.json({ ok: true, group: updated });
+  } catch (e) {
+    res.status(400).json({ error: e.message || 'Falha ao atualizar grupo' });
+  }
+});
+
 app.post('/api/autopoll/toggle', (req, res) => {
   autoPollCfg.enabled = !autoPollCfg.enabled;
   saveAutoPoll();
@@ -2451,7 +2558,7 @@ app.post('/api/autopoll/app/:name/toggle', (req, res) => {
   saveAutoPoll();
   notifyWhatsApp('🧩 Auto-deploy por aplicação alterado', [
     '📌 Origem: dashboard',
-    `📱 App: ${name}`,
+    `📱 App: ${appLabel(name)}`,
     `📡 Status: ${autoPollCfg.apps[name].enabled ? 'ATIVADO' : 'DESATIVADO'}`,
   ]).catch(() => {});
   res.json({ ok: true, app: name, enabled: autoPollCfg.apps[name].enabled });
@@ -2465,6 +2572,195 @@ app.post('/api/autopoll/check-now', async (req, res) => {
   ]).catch(() => {});
   res.json({ ok: true, msg: 'Verificação iniciada' });
   setImmediate(() => pollGitUpdates());
+});
+
+function botAuthMiddleware(req, res, next) {
+  const t = req.body?.token;
+  if (!CINI_BOT_TOKEN || !t || t !== CINI_BOT_TOKEN) {
+    return res.status(401).json({ error: 'Token inválido' });
+  }
+  next();
+}
+
+app.post('/api/bot/summary', botAuthMiddleware, async (req, res) => {
+  try {
+    const list = await pm2List();
+    const apps = sortAppsByCardOrder(list.filter(p => !p.name.startsWith('pm2-') && !NOTIFY_EXCLUDE.has(p.name)));
+    const result = apps.map(p => {
+      const st = p.pm2_env.status === 'online';
+      const mem = Math.round((p.monit?.memory ?? 0) / 1024 / 1024);
+      const upMs = st ? Date.now() - p.pm2_env.pm_uptime : 0;
+      return {
+        name:     p.name,
+        label:    appLabel(p.name),
+        status:   p.pm2_env.status,
+        mem,
+        cpu:      p.monit?.cpu ?? 0,
+        upH:      Math.floor(upMs / 3_600_000),
+        upM:      Math.floor((upMs % 3_600_000) / 60_000),
+        restarts: p.pm2_env.restart_time,
+        port:     readAppPort(p.name),
+      };
+    });
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/bot/action', botAuthMiddleware, async (req, res) => {
+  const { action, app: appName } = req.body;
+  if (!['restart', 'stop', 'start'].includes(action))
+    return res.status(400).json({ error: 'Ação inválida' });
+  if (!APP_REGISTRY[appName])
+    return res.status(404).json({ error: `App "${appName}" não encontrado` });
+  try {
+    await pm2Do(action, appName);
+    addDeployHistory({ time: now(), app: appName, status: 'ok', detail: `${action} via WhatsApp` });
+    res.json({ ok: true });
+  } catch (e) {
+    addDeployHistory({ time: now(), app: appName, status: 'error', detail: `${action} via WhatsApp: ${e.message}` });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/bot/git', botAuthMiddleware, (req, res) => {
+  const appName = req.body.app;
+  if (!APP_REGISTRY[appName])
+    return res.status(404).json({ error: `App "${appName}" não encontrado` });
+  try {
+    res.json(gitInfo(appName));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/bot/errors', botAuthMiddleware, async (req, res) => {
+  const appName = req.body.app;
+  if (!APP_REGISTRY[appName])
+    return res.status(404).json({ error: `App "${appName}" não encontrado` });
+  try {
+    const pool = await getPool();
+    const r = await pool.request()
+      .input('app', sql.NVarChar(100), appName)
+      .query(`
+        SELECT TOP 10
+          ID_ERRO, TIPO, ORIGEM, DETALHE, DTVISTO,
+          FORMAT(DTINC, 'dd/MM/yyyy HH:mm:ss') AS TEMPO
+        FROM dbo.CINI_MANAGER_ERRO_HISTORICO
+        WHERE APLICACAO = @app
+        ORDER BY ID_ERRO DESC
+      `);
+    res.json(r.recordset);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/bot/logs', botAuthMiddleware, (req, res) => {
+  const appName = req.body.app;
+  if (!APP_REGISTRY[appName])
+    return res.status(404).json({ error: `App "${appName}" não encontrado` });
+  const logs = (logBuffers[appName] || []).slice(-10);
+  res.json(logs);
+});
+
+app.post('/api/bot/ack', botAuthMiddleware, async (req, res) => {
+  const appName = req.body.app;
+  if (!APP_REGISTRY[appName])
+    return res.status(404).json({ error: `App "${appName}" não encontrado` });
+  try {
+    await ackErrorsInDB(appName);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+const WEBHOOK_SECRET = (() => {
+  try {
+    return require('fs').readFileSync(
+      require('path').join(__dirname, '.webhook-secret'), 'utf8'
+    ).trim();
+  } catch { return ''; }
+})();
+
+const monitorRestartThrottle = new Map();
+const MONITOR_RESTART_COOLDOWN_MS = 5 * 60 * 1000;
+
+app.post('/api/webhook/monitor', async (req, res) => {
+  const tok = req.headers['x-webhook-secret'] || req.query.token || '';
+  if (WEBHOOK_SECRET && tok !== WEBHOOK_SECRET) {
+    console.warn('[webhook/monitor] token inválido');
+    return res.status(401).json({ error: 'Não autorizado' });
+  }
+
+  res.json({ ok: true }); 
+
+  try {
+    const body = req.body || {};
+    const monitorName = body?.monitor?.name || body?.monitorName || '';
+    const heartbeatStatus = body?.heartbeat?.status;   
+    const msgText = body?.msg || body?.message || body?.text || '';
+    const isMonitorPix =
+      monitorName === 'Monitor PIX' ||
+      String(msgText).includes('Monitor PIX');
+
+    const isDown =
+      heartbeatStatus === 0 ||
+      String(msgText).toLowerCase().includes('down') ||
+      String(msgText).includes('went down') ||
+      String(msgText).includes('🔴');
+
+    if (!isMonitorPix || !isDown) {
+      console.log(`[webhook/monitor] mensagem ignorada — monitorName="${monitorName}" status=${heartbeatStatus} msg="${String(msgText).slice(0, 80)}"`);
+      return;
+    }
+
+    const lastRestart = monitorRestartThrottle.get('monitor-pix') || 0;
+    if (Date.now() - lastRestart < MONITOR_RESTART_COOLDOWN_MS) {
+      const restante = Math.ceil((MONITOR_RESTART_COOLDOWN_MS - (Date.now() - lastRestart)) / 60000);
+      console.log(`[webhook/monitor] Monitor PIX — restart suprimido (cooldown ${restante} min restante)`);
+      return;
+    }
+    monitorRestartThrottle.set('monitor-pix', Date.now());
+    const APP_ALVO = 'client-baixas-pix';
+    const errorDetail = body?.heartbeat?.msg || String(msgText).slice(0, 300);
+    console.log(`[webhook/monitor] Monitor PIX DOWN detectado — reiniciando ${APP_ALVO}...`);
+
+    addErrorHistory({
+      time: now(),
+      app: APP_ALVO,
+      type: 'monitor',
+      source: 'webhook/monitor',
+      detail: `Monitor PIX DOWN — restart automático. Detalhe: ${errorDetail}`,
+    });
+
+    try {
+      await pm2Do('restart', APP_ALVO);
+      const info = await pm2Info(APP_ALVO);
+      const monitorUrl = body?.monitor?.url || body?.monitor?.link || body?.monitorUrl || '';
+      const title = '🔴 Application went down';
+      const monitorBlock = `[${monitorName}] [🔴 Down] ${String(body?.heartbeat?.msg || body?.msg || errorDetail).slice(0, 300)}`;
+      const wppMsg =
+        `${title}\n` +
+        `${monitorName}\n` +
+        `${monitorBlock}\n` +
+        (monitorUrl ? `${monitorUrl}\n` : '') +
+        `\n✅ Restart automático — ${appLabel(APP_ALVO)}\n📅 ${now()}\n${'━'.repeat(25)}\n` +
+        (info ? `📊 Status: ${info.status} | PID ${info.pid}\n💾 Memória: ${info.mem}MB` : '');
+      await sendWhatsApp(wppMsg);
+      addDeployHistory({ time: now(), app: APP_ALVO, status: 'ok', detail: 'restart automático — Monitor PIX DOWN' });
+      console.log(`[webhook/monitor] ${APP_ALVO} reiniciado com sucesso.`);
+    } catch (restartErr) {
+      const monitorUrl2 = body?.monitor?.url || body?.monitor?.link || body?.monitorUrl || '';
+      const title2 = '🔴 Application went down';
+      const monitorBlock2 = `[${monitorName}] [🔴 Down] ${String(body?.heartbeat?.msg || body?.msg || errorDetail).slice(0, 300)}`;
+      const wppMsg =
+        `${title2}\n` +
+        `${monitorName}\n` +
+        `${monitorBlock2}\n` +
+        (monitorUrl2 ? `${monitorUrl2}\n` : '') +
+        `\n❌ Restart automático FALHOU — ${appLabel(APP_ALVO)}\n📅 ${now()}\n${'━'.repeat(25)}\n` +
+        `⚠️ Erro restart: ${restartErr.message}`;
+      await sendWhatsApp(wppMsg);
+      addDeployHistory({ time: now(), app: APP_ALVO, status: 'error', detail: `restart automático falhou: ${restartErr.message}` });
+      console.error(`[webhook/monitor] Falha no restart de ${APP_ALVO}:`, restartErr.message);
+    }
+  } catch (e) {
+    console.error('[webhook/monitor] erro interno:', e.message);
+  }
 });
 
 loadHistoriesFromDB().then(() => {

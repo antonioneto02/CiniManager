@@ -493,7 +493,10 @@ function renderGroupActions() {
     el.innerHTML = '';
     return;
   }
-  el.innerHTML = `<button class="btn btn-sm btn-red" onclick="deleteSelectedGroup()">🗑 Excluir grupo: ${esc(group.name)}</button>`;
+  el.innerHTML = `
+    <button class="btn btn-sm" onclick="openEditGroupModal()">✏️ Editar grupo: ${esc(group.name)}</button>
+    <button class="btn btn-sm btn-red" onclick="deleteSelectedGroup()">🗑 Excluir grupo: ${esc(group.name)}</button>
+  `;
 }
 
 function selectGroup(groupId) {
@@ -676,6 +679,66 @@ function openGroupModal() {
 
 function closeGroupModal() {
   document.getElementById('group-modal').classList.remove('open');
+}
+
+function openEditGroupModal() {
+  const group = groups.find(g => String(g.id) === String(selectedGroupId));
+  if (!group) return;
+
+  const rows = apps
+    .slice()
+    .sort((a, b) => displayName(a.name).localeCompare(displayName(b.name), 'pt-BR'))
+    .map(a => `<tr>
+      <td style="padding:6px;font-weight:600">${esc(displayName(a.name))}</td>
+      <td style="padding:6px;color:var(--muted)">${esc(a.name)}</td>
+      <td style="padding:6px;text-align:center"><input type="checkbox" class="group-app-check" value="${esc(a.name)}" ${ (group.apps||[]).includes(a.name) ? 'checked' : '' }></td>
+    </tr>`)
+    .join('');
+
+  document.getElementById('group-body').innerHTML = `
+    <div class="section" style="margin-bottom:10px">
+      <div class="section-title">Nome do Grupo</div>
+      <input id="group-name" type="text" placeholder="Ex: Operação Noturna" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:9px 10px" value="${esc(group.name)}" disabled />
+    </div>
+    <div class="section" style="margin-bottom:8px">
+      <div class="section-title">Serviços do Grupo</div>
+      <table class="commit-tbl">
+        <tr>
+          <th style="color:var(--muted);font-size:10px;padding:6px">APP</th>
+          <th style="color:var(--muted);font-size:10px;padding:6px">NOME TÉCNICO</th>
+          <th style="color:var(--muted);font-size:10px;padding:6px;text-align:center">INCLUIR</th>
+        </tr>
+        ${rows}
+      </table>
+    </div>`;
+
+  document.getElementById('group-footer').innerHTML = `
+    <button class="btn" onclick="toggleAllGroupApps(true)">Marcar todos</button>
+    <button class="btn" onclick="toggleAllGroupApps(false)">Desmarcar</button>
+    <button class="btn btn-blue" onclick="confirmUpdateGroup()">Salvar alterações</button>
+    <button class="btn" onclick="closeGroupModal()">Cancelar</button>`;
+
+  document.getElementById('group-modal').classList.add('open');
+}
+
+async function confirmUpdateGroup() {
+  const group = groups.find(g => String(g.id) === String(selectedGroupId));
+  if (!group) return;
+  const selected = Array.from(document.querySelectorAll('.group-app-check:checked')).map(el => el.value);
+  if (!selected.length) return toast('Selecione ao menos um serviço', 'err');
+
+  try {
+    const result = await api('PUT', `/api/groups/${group.id}`, { apps: selected });
+    toast(`Grupo "${result.group.name}" atualizado`);
+    closeGroupModal();
+    await loadGroups();
+    selectedGroupId = String(result.group.id);
+    renderGroupNav();
+    renderGrid();
+    renderHeader();
+  } catch (e) {
+    toast(e.message, 'err');
+  }
 }
 
 function toggleAllGroupApps(checked) {
@@ -1534,7 +1597,6 @@ function startErrorHistorySSE() {
 }
 
 function applyAckLocally(name) {
-  // atualiza estado local imediatamente — sem esperar API nem SSE
   dismissedApps.set(name, Date.now());
   errorHistoryItems.forEach(h => { if (h.app === name) h.seen = true; });
   const app = apps.find(a => a.name === name);

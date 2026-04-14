@@ -3,7 +3,19 @@
     "allow": [
       "Read(//c/Users/nerias.sousa/.pm2/logs/**)",
       "Bash(node -e ':*)",
-      "Bash(pm2 restart:*)"
+      "Bash(pm2 restart:*)",
+      "Read(//e/Projetos/Central-Notificacoes/whatsapp-bot/**)",
+      "Read(//e/Projetos/Central-Notificacoes/**)",
+      "Bash(pm2 env:*)",
+      "Bash(pm2 show:*)",
+      "Bash(pm2 list:*)",
+      "Bash(curl -s --connect-timeout 3 http://localhost:3001/dashboard)",
+      "Bash(ping -n 1 monitor.hcini.local)",
+      "Bash(curl -s --connect-timeout 3 http://monitor.hcini.local:3001/dashboard)",
+      "Bash(ipconfig)"
+    ],
+    "additionalDirectories": [
+      "E:\\Projetos\\Central-Notificacoes\\whatsapp-bot"
     ]
   }
 }
