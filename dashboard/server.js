@@ -1946,10 +1946,8 @@ app.get('/api/apps/:name/error-detail', (req, res) => {
   })();
 });
 
-app.post('/api/apps/:name/:action', async (req, res) => {
+app.post('/api/apps/:name/:action(start|stop|restart)', async (req, res) => {
   const { name, action } = req.params;
-  if (!['start','stop','restart'].includes(action))
-    return res.status(400).json({ error: 'Ação inválida' });
   try {
     await pm2Do(action, name);
     if (['restart','stop','start'].includes(action)) {
