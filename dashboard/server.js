@@ -2732,29 +2732,40 @@ app.post('/api/webhook/monitor', async (req, res) => {
       const info = await pm2Info(APP_ALVO);
       const monitorUrl = body?.monitor?.url || body?.monitor?.link || body?.monitorUrl || '';
       const title = '🔴 Application went down';
-      const monitorBlock = `[${monitorName}] [🔴 Down] ${String(body?.heartbeat?.msg || body?.msg || errorDetail).slice(0, 300)}`;
-      const wppMsg =
-        `${title}\n` +
-        `${monitorName}\n` +
-        `${monitorBlock}\n` +
-        (monitorUrl ? `${monitorUrl}\n` : '') +
-        `\n✅ Restart automático — ${appLabel(APP_ALVO)}\n📅 ${now()}\n${'━'.repeat(25)}\n` +
-        (info ? `📊 Status: ${info.status} | PID ${info.pid}\n💾 Memória: ${info.mem}MB` : '');
-      await sendWhatsApp(wppMsg);
+      const mainLine = String(body?.heartbeat?.msg || body?.msg || errorDetail).slice(0, 300);
+      const lines = [
+        `📱 ${monitorName}`,
+        `[${monitorName}] [🔴 Down] ${mainLine}`,
+      ];
+      if (monitorUrl) lines.push(monitorUrl);
+      lines.push('', `✅ Restart automático — ${appLabel(APP_ALVO)}`, `📊 Status: ${info?.status || '?'} | PID ${info?.pid || '?'}${info ? `\n💾 Memória: ${info.mem}MB` : ''}`);
+      const others = body?.others || body?.events || body?.errors || body?.additional || null;
+      if (Array.isArray(others) && others.length) {
+        lines.push('', 'Outros');
+        for (const o of others.slice(0, 6)) lines.push(`[Outros] ${String(o).slice(0, 220)}`);
+      }
+
+      await notifyWhatsApp(title, lines);
       addDeployHistory({ time: now(), app: APP_ALVO, status: 'ok', detail: 'restart automático — Monitor PIX DOWN' });
       console.log(`[webhook/monitor] ${APP_ALVO} reiniciado com sucesso.`);
     } catch (restartErr) {
       const monitorUrl2 = body?.monitor?.url || body?.monitor?.link || body?.monitorUrl || '';
       const title2 = '🔴 Application went down';
-      const monitorBlock2 = `[${monitorName}] [🔴 Down] ${String(body?.heartbeat?.msg || body?.msg || errorDetail).slice(0, 300)}`;
-      const wppMsg =
-        `${title2}\n` +
-        `${monitorName}\n` +
-        `${monitorBlock2}\n` +
-        (monitorUrl2 ? `${monitorUrl2}\n` : '') +
-        `\n❌ Restart automático FALHOU — ${appLabel(APP_ALVO)}\n📅 ${now()}\n${'━'.repeat(25)}\n` +
-        `⚠️ Erro restart: ${restartErr.message}`;
-      await sendWhatsApp(wppMsg);
+      const mainLine2 = String(body?.heartbeat?.msg || body?.msg || errorDetail).slice(0, 300);
+      const lines2 = [
+        `📱 ${monitorName}`,
+        `[${monitorName}] [🔴 Down] ${mainLine2}`,
+      ];
+      if (monitorUrl2) lines2.push(monitorUrl2);
+      lines2.push('', `❌ Restart automático FALHOU — ${appLabel(APP_ALVO)}`, `⚠️ Erro restart: ${restartErr.message}`);
+
+      const others2 = body?.others || body?.events || body?.errors || body?.additional || null;
+      if (Array.isArray(others2) && others2.length) {
+        lines2.push('', 'Outros');
+        for (const o of others2.slice(0, 6)) lines2.push(`[Outros] ${String(o).slice(0, 220)}`);
+      }
+
+      await notifyWhatsApp(title2, lines2);
       addDeployHistory({ time: now(), app: APP_ALVO, status: 'error', detail: `restart automático falhou: ${restartErr.message}` });
       console.error(`[webhook/monitor] Falha no restart de ${APP_ALVO}:`, restartErr.message);
     }
