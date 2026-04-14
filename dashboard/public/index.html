@@ -451,6 +451,7 @@ async function loadApps() {
     await loadGroups();
     renderGrid();
     renderHeader();
+    renderHistoryPanel();
     updateErrorUnseenBadge();
   } catch {}
 }
@@ -1522,18 +1523,33 @@ function startErrorHistorySSE() {
   es.onerror = () => setTimeout(startErrorHistorySSE, 5000);
 }
 
+function applyAckLocally(name) {
+  // atualiza estado local imediatamente — sem esperar API nem SSE
+  dismissedApps.set(name, Date.now());
+  errorHistoryItems.forEach(h => { if (h.app === name) h.seen = true; });
+  const app = apps.find(a => a.name === name);
+  if (app) {
+    app.hasAttention = false;
+    app.attentionType = null;
+    app.attentionReason = null;
+  }
+  renderGrid();
+  renderHistoryPanel();
+  updateErrorUnseenBadge();
+}
+
 async function markErrorAsSeen() {
   if (!currentErrorModalApp) { closeErrorModal(); return; }
-  dismissedApps.set(currentErrorModalApp, Date.now());
+  applyAckLocally(currentErrorModalApp);
   document.getElementById('error-modal').classList.remove('open');
   try { await fetch(`/api/apps/${encodeURIComponent(currentErrorModalApp)}/ack-errors`, { method: 'POST' }); } catch {}
-  await loadApps();
+  loadApps();
 }
 
 async function quickAckError(name) {
-  dismissedApps.set(name, Date.now());
+  applyAckLocally(name);
   try { await fetch(`/api/apps/${encodeURIComponent(name)}/ack-errors`, { method: 'POST' }); } catch {}
-  await loadApps();
+  loadApps();
 }
 
 async function openErrorModal(name) {
