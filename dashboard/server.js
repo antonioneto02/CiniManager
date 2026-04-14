@@ -731,6 +731,11 @@ function pushHistory() {
   historySSE.forEach(r => { try { r.write(data); } catch {} });
 }
 
+function pushErrorHistory() {
+  const data = `data: ${JSON.stringify(errorHistory)}\n\n`;
+  errorSSE.forEach(r => { try { r.write(data); } catch {} });
+}
+
 function addDeployHistory(rec) {
   deployHistory.unshift(rec);
   if (deployHistory.length > 100) deployHistory.pop();
@@ -1855,6 +1860,7 @@ app.post('/api/apps/:name/ack-errors', (req, res) => {
   delete pollErrorAt[name];
 
   errorHistory.filter(e => e.app === name && !e.seen).forEach(e => { e.seen = true; });
+  pushErrorHistory();
   ackErrorsInDB(name);
 
   res.json({ ok: true, app: name, cleared: true });

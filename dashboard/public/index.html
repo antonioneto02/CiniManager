@@ -1449,17 +1449,30 @@ function renderErrorHistory(hist) {
     time: 'agora',
     preview: a.attentionReason || 'Erro ativo',
     detail: a.attentionReason || 'Erro ativo',
+    seen: false,
     _active: true,
   }));
-  const merged = [...active, ...(hist || [])];
+  const activeApps = new Set(active.map(a => a.app));
+  // evita duplicar erros não-vistos de apps que já aparecem como ativos
+  const filteredHist = (hist || []).filter(h => h.seen || !activeApps.has(h.app));
+  const merged = [...active, ...filteredHist];
 
   if (!merged.length) { el.innerHTML='<div class="empty">Nenhum erro recente.</div>'; return; }
-  el.innerHTML = merged.map(h=>`
-    <div class="h-item h-runtime" style="cursor:pointer" onclick="${h._active ? `openErrorModal('${esc(h.app)}')` : `openErrorHistoryItem(${Number(h.id)})`}">
-      <div class="h-app">[ERRO] ${esc(displayName(h.app))}</div>
+  el.innerHTML = merged.map(h => {
+    const itemClass = h.seen ? 'h-ok' : 'h-runtime';
+    const label = h.seen ? '[VISTO]' : '[ERRO]';
+    const ackBtn = !h.seen
+      ? `<button class="btn btn-sm btn-green" style="margin-top:4px;padding:1px 7px;font-size:10px" onclick="event.stopPropagation();quickAckError('${esc(h.app)}')" title="Marcar como visto">✓ Visto</button>`
+      : '';
+    const clickAction = h._active ? `openErrorModal('${esc(h.app)}')` : `openErrorHistoryItem(${Number(h.id)})`;
+    return `
+    <div class="h-item ${itemClass}" style="cursor:pointer" onclick="${clickAction}">
+      <div class="h-app">${label} ${esc(displayName(h.app))}</div>
       <div class="h-detail">${esc(h.preview || h.detail || '')}</div>
       <div class="h-time">${esc(h.time || '')}${h.source ? ` • ${esc(h.source)}` : ''}</div>
-    </div>`).join('');
+      ${ackBtn}
+    </div>`;
+  }).join('');
 }
 
 function renderHistoryPanel() {
@@ -1499,6 +1512,12 @@ async function markErrorAsSeen() {
   dismissedApps.set(currentErrorModalApp, Date.now());
   document.getElementById('error-modal').classList.remove('open');
   try { await fetch(`/api/apps/${encodeURIComponent(currentErrorModalApp)}/ack-errors`, { method: 'POST' }); } catch {}
+  await loadApps();
+}
+
+async function quickAckError(name) {
+  dismissedApps.set(name, Date.now());
+  try { await fetch(`/api/apps/${encodeURIComponent(name)}/ack-errors`, { method: 'POST' }); } catch {}
   await loadApps();
 }
 
@@ -1542,6 +1561,8 @@ async function openErrorHistoryItem(id) {
   document.getElementById('error-modal').classList.add('open');
   try {
     const data = await api('GET', `/api/errors-history/${id}`);
+    currentErrorModalApp = data.app;
+    document.getElementById('error-title').textContent = `🔴 Erro — ${displayName(data.app)}`;
     document.getElementById('error-body').innerHTML = `
       <div class="section">
         <div class="section-title">Aplicação</div>
