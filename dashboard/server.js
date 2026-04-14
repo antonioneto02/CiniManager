@@ -746,10 +746,13 @@ function addDeployHistory(rec) {
     req.input('status',    sql.NVarChar(20),        String(rec.status || 'ok'));
     req.input('detalhe',   sql.NVarChar(sql.MAX),   String(rec.detail || ''));
     return req.query(`
-      INSERT INTO dbo.CINI_MANAGER_DEPLOY_HISTORICO (APLICACAO, STATUS, DETALHE)
-      VALUES (@aplicacao, @status, @detalhe)
+      INSERT INTO dbo.CINI_MANAGER_DEPLOY_HISTORICO (APLICACAO, STATUS, DETALHE, DTINC)
+      VALUES (@aplicacao, @status, @detalhe, GETDATE())
     `);
-  }).catch(e => console.error('[db] deploy insert:', e.message));
+  }).catch(e => {
+    console.error('[db] deploy insert FALHOU — verifique a tabela CINI_MANAGER_DEPLOY_HISTORICO:', e.message);
+    _pool = null;
+  });
 }
 
 function addErrorHistory(entry) {
@@ -776,10 +779,13 @@ function addErrorHistory(entry) {
     req.input('detalhe',   sql.NVarChar(sql.MAX), rec.detail);
     req.input('resumo',    sql.NVarChar(300),    rec.preview);
     return req.query(`
-      INSERT INTO dbo.CINI_MANAGER_ERRO_HISTORICO (APLICACAO, TIPO, ORIGEM, DETALHE, RESUMO)
-      VALUES (@aplicacao, @tipo, @origem, @detalhe, @resumo)
+      INSERT INTO dbo.CINI_MANAGER_ERRO_HISTORICO (APLICACAO, TIPO, ORIGEM, DETALHE, RESUMO, DTINC)
+      VALUES (@aplicacao, @tipo, @origem, @detalhe, @resumo, GETDATE())
     `);
-  }).catch(e => console.error('[db] erro insert:', e.message));
+  }).catch(e => {
+    console.error('[db] erro insert FALHOU — verifique a tabela CINI_MANAGER_ERRO_HISTORICO:', e.message);
+    _pool = null;
+  });
 }
 
 async function ackErrorsInDB(appName) {
@@ -2197,11 +2203,16 @@ app.get('/api/errors-history/stream', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
   res.write(`data: ${JSON.stringify(errorHistory)}\n\n`);
 
   errorSSE.push(res);
+  const keepalive = setInterval(() => {
+    try { res.write(': keepalive\n\n'); } catch { clearInterval(keepalive); }
+  }, 15000);
   req.on('close', () => {
+    clearInterval(keepalive);
     const i = errorSSE.indexOf(res);
     if (i !== -1) errorSSE.splice(i, 1);
   });

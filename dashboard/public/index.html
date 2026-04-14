@@ -204,7 +204,7 @@ mark.log-hl{background:#d29922;color:#000;border-radius:2px;padding:0 2px;font-s
     <div class="sidebar">
       <div class="sidebar-head">
         <button id="btn-tab-deploy" class="btn btn-sm sidebar-tab btn-blue" onclick="setHistoryMode('deploy')">📋 Deploys</button>
-        <button id="btn-tab-error" class="btn btn-sm sidebar-tab" onclick="setHistoryMode('error')">🔴 Erros</button>
+        <button id="btn-tab-error" class="btn btn-sm sidebar-tab" onclick="setHistoryMode('error')">🔴 Erros <span id="error-unseen-badge" style="display:none;background:#f85149;color:#fff;border-radius:999px;padding:0 5px;font-size:10px;font-weight:700;margin-left:3px"></span></button>
       </div>
       <div class="sidebar-body" id="history">
         <div class="empty">Nenhum deploy ainda.</div>
@@ -451,6 +451,7 @@ async function loadApps() {
     await loadGroups();
     renderGrid();
     renderHeader();
+    updateErrorUnseenBadge();
   } catch {}
 }
 
@@ -1487,6 +1488,7 @@ function setHistoryMode(mode) {
   btnDeploy.classList.toggle('btn-blue', historyMode === 'deploy');
   btnError.classList.toggle('btn-blue', historyMode === 'error');
   renderHistoryPanel();
+  updateErrorUnseenBadge();
 }
 
 function startHistorySSE() {
@@ -1498,13 +1500,26 @@ function startHistorySSE() {
   es.onerror   = () => setTimeout(startHistorySSE, 5000);
 }
 
+function updateErrorUnseenBadge() {
+  const unseen = errorHistoryItems.filter(h => !h.seen).length;
+  const badge = document.getElementById('error-unseen-badge');
+  if (!badge) return;
+  if (unseen > 0 && historyMode !== 'error') {
+    badge.textContent = unseen;
+    badge.style.display = '';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
 function startErrorHistorySSE() {
   const es = new EventSource('/api/errors-history/stream');
   es.onmessage = e => {
     errorHistoryItems = JSON.parse(e.data);
-    if (historyMode === 'error') renderHistoryPanel();
+    renderHistoryPanel();
+    updateErrorUnseenBadge();
   };
-  es.onerror   = () => setTimeout(startErrorHistorySSE, 5000);
+  es.onerror = () => setTimeout(startErrorHistorySSE, 5000);
 }
 
 async function markErrorAsSeen() {
