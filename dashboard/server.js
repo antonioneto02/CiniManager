@@ -356,19 +356,44 @@ const GROUPS_DB_CFG = {
 };
 
 let _pool = null;
+let _poolPromise = null;
 let _groupsPool = null;
+let _groupsPoolPromise = null;
+
 async function getPool() {
   if (_pool) return _pool;
-  _pool = await new sql.ConnectionPool(DB_CFG).connect();
-  _pool.on('error', () => { _pool = null; });
-  return _pool;
+  if (!_poolPromise) {
+    _poolPromise = new sql.ConnectionPool(DB_CFG).connect()
+      .then(pool => {
+        _pool = pool;
+        _poolPromise = null;
+        pool.on('error', () => { _pool = null; });
+        return pool;
+      })
+      .catch(err => {
+        _poolPromise = null;
+        throw err;
+      });
+  }
+  return _poolPromise;
 }
 
 async function getGroupsPool() {
   if (_groupsPool) return _groupsPool;
-  _groupsPool = await new sql.ConnectionPool(GROUPS_DB_CFG).connect();
-  _groupsPool.on('error', () => { _groupsPool = null; });
-  return _groupsPool;
+  if (!_groupsPoolPromise) {
+    _groupsPoolPromise = new sql.ConnectionPool(GROUPS_DB_CFG).connect()
+      .then(pool => {
+        _groupsPool = pool;
+        _groupsPoolPromise = null;
+        pool.on('error', () => { _groupsPool = null; });
+        return pool;
+      })
+      .catch(err => {
+        _groupsPoolPromise = null;
+        throw err;
+      });
+  }
+  return _groupsPoolPromise;
 }
 
 async function listServiceGroups() {
@@ -740,19 +765,19 @@ function addDeployHistory(rec) {
   deployHistory.unshift(rec);
   if (deployHistory.length > 100) deployHistory.pop();
   pushHistory();
-  getPool().then(pool => {
-    const req = pool.request();
-    req.input('aplicacao', sql.NVarChar(100),      String(rec.app    || ''));
-    req.input('status',    sql.NVarChar(20),        String(rec.status || 'ok'));
-    req.input('detalhe',   sql.NVarChar(sql.MAX),   String(rec.detail || ''));
-    return req.query(`
-      INSERT INTO dbo.CINI_MANAGER_DEPLOY_HISTORICO (APLICACAO, STATUS, DETALHE, DTINC)
-      VALUES (@aplicacao, @status, @detalhe, GETDATE())
-    `);
-  }).catch(e => {
-    console.error('[db] deploy insert FALHOU — verifique a tabela CINI_MANAGER_DEPLOY_HISTORICO:', e.message);
-    _pool = null;
-  });
+  (async () => {
+    try {
+      const pool = await getPool();
+      await pool.request()
+        .input('aplicacao', sql.NVarChar(100),    String(rec.app    || ''))
+        .input('status',    sql.NVarChar(20),     String(rec.status || 'ok'))
+        .input('detalhe',   sql.NVarChar(sql.MAX), String(rec.detail || ''))
+        .query(`INSERT INTO dbo.CINI_MANAGER_DEPLOY_HISTORICO (APLICACAO, STATUS, DETALHE, DTINC)
+                VALUES (@aplicacao, @status, @detalhe, GETDATE())`);
+    } catch (e) {
+      console.error('[db] addDeployHistory ERRO:', e.message);
+    }
+  })();
 }
 
 function addErrorHistory(entry) {
@@ -769,23 +794,22 @@ function addErrorHistory(entry) {
   };
   errorHistory.unshift(rec);
   if (errorHistory.length > 200) errorHistory.pop();
-  const data = `data: ${JSON.stringify(errorHistory)}\n\n`;
-  errorSSE.forEach(r => { try { r.write(data); } catch {} });
-  getPool().then(pool => {
-    const req = pool.request();
-    req.input('aplicacao', sql.NVarChar(100),    rec.app);
-    req.input('tipo',      sql.NVarChar(30),     rec.type);
-    req.input('origem',    sql.NVarChar(50),     rec.source || '');
-    req.input('detalhe',   sql.NVarChar(sql.MAX), rec.detail);
-    req.input('resumo',    sql.NVarChar(300),    rec.preview);
-    return req.query(`
-      INSERT INTO dbo.CINI_MANAGER_ERRO_HISTORICO (APLICACAO, TIPO, ORIGEM, DETALHE, RESUMO, DTINC)
-      VALUES (@aplicacao, @tipo, @origem, @detalhe, @resumo, GETDATE())
-    `);
-  }).catch(e => {
-    console.error('[db] erro insert FALHOU — verifique a tabela CINI_MANAGER_ERRO_HISTORICO:', e.message);
-    _pool = null;
-  });
+  pushErrorHistory();
+  (async () => {
+    try {
+      const pool = await getPool();
+      await pool.request()
+        .input('aplicacao', sql.NVarChar(100),     rec.app)
+        .input('tipo',      sql.NVarChar(30),      rec.type)
+        .input('origem',    sql.NVarChar(50),      rec.source || '')
+        .input('detalhe',   sql.NVarChar(sql.MAX), rec.detail)
+        .input('resumo',    sql.NVarChar(300),     rec.preview)
+        .query(`INSERT INTO dbo.CINI_MANAGER_ERRO_HISTORICO (APLICACAO, TIPO, ORIGEM, DETALHE, RESUMO, DTINC)
+                VALUES (@aplicacao, @tipo, @origem, @detalhe, @resumo, GETDATE())`);
+    } catch (e) {
+      console.error('[db] addErrorHistory ERRO:', e.message);
+    }
+  })();
 }
 
 async function ackErrorsInDB(appName) {
@@ -2330,6 +2354,7 @@ app.post('/api/autopoll/check-now', async (req, res) => {
 
 loadHistoriesFromDB().then(() => {
   app.listen(PORT, () => console.log(`[dashboard] Rodando em http://localhost:${PORT}`));
-}).catch(() => {
-  app.listen(PORT, () => console.log(`[dashboard] Rodando em http://localhost:${PORT}`));
+}).catch(e => {
+  console.error('[dashboard] ERRO ao carregar históricos do banco:', e?.message || e);
+  app.listen(PORT, () => console.log(`[dashboard] Rodando em http://localhost:${PORT} (sem histórico do banco)`));
 });
