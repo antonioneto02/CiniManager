@@ -314,7 +314,7 @@ mark.log-hl{background:#d29922;color:#000;border-radius:2px;padding:0 2px;font-s
     </div>
     <div class="modal-body" id="error-body"><span class="spin"></span> Carregando erro...</div>
     <div class="modal-footer">
-      <button class="btn btn-green" onclick="markErrorAsSeen()">✓ Marcar como visto</button>
+      <button class="btn btn-green" id="btn-mark-seen" onclick="markErrorAsSeen()">✓ Marcar como visto</button>
       <button class="btn" onclick="closeErrorModal()">Fechar</button>
     </div>
   </div>
@@ -400,7 +400,12 @@ function toast(msg, type='ok') {
 }
 
 async function api(method, url, body) {
-  const r = await fetch(url, {method, headers:{'Content-Type':'application/json'}, body: body ? JSON.stringify(body) : undefined});
+  const opts = { method };
+  if (body !== undefined) {
+    opts.headers = { 'Content-Type': 'application/json' };
+    opts.body = JSON.stringify(body);
+  }
+  const r = await fetch(url, opts);
   const ct = (r.headers.get('content-type') || '').toLowerCase();
   const raw = await r.text();
   let j = null;
@@ -1544,21 +1549,24 @@ function applyAckLocally(name) {
 }
 
 async function markErrorAsSeen() {
-  if (!currentErrorModalApp) { closeErrorModal(); return; }
-  applyAckLocally(currentErrorModalApp);
+  const name = document.getElementById('btn-mark-seen')?.dataset?.app || currentErrorModalApp;
+  if (!name) { closeErrorModal(); return; }
   document.getElementById('error-modal').classList.remove('open');
-  try { await fetch(`/api/apps/${encodeURIComponent(currentErrorModalApp)}/ack-errors`, { method: 'POST' }); } catch {}
+  try { applyAckLocally(name); } catch(e) { console.error('[ack] applyAckLocally:', e); }
+  try { await api('POST', `/api/apps/${encodeURIComponent(name)}/ack-errors`); } catch(e) { console.error('[ack] endpoint:', e); }
   loadApps();
 }
 
 async function quickAckError(name) {
-  applyAckLocally(name);
-  try { await fetch(`/api/apps/${encodeURIComponent(name)}/ack-errors`, { method: 'POST' }); } catch {}
+  try { applyAckLocally(name); } catch(e) { console.error('[ack] applyAckLocally:', e); }
+  try { await api('POST', `/api/apps/${encodeURIComponent(name)}/ack-errors`); } catch(e) { console.error('[ack] endpoint:', e); }
   loadApps();
 }
 
 async function openErrorModal(name) {
   currentErrorModalApp = name;
+  const btnSeen = document.getElementById('btn-mark-seen');
+  if (btnSeen) { btnSeen.dataset.app = name; btnSeen.style.display = ''; }
 
   document.getElementById('error-title').textContent = `🔴 Erro — ${displayName(name)}`;
   document.getElementById('error-body').innerHTML = '<span class="spin"></span> Carregando detalhes...';
@@ -1592,12 +1600,15 @@ async function openErrorModal(name) {
 }
 
 async function openErrorHistoryItem(id) {
+  const btnSeen = document.getElementById('btn-mark-seen');
+  if (btnSeen) { btnSeen.dataset.app = ''; btnSeen.style.display = 'none'; }
   document.getElementById('error-title').textContent = '🔴 Erro completo';
   document.getElementById('error-body').innerHTML = '<span class="spin"></span> Carregando detalhes...';
   document.getElementById('error-modal').classList.add('open');
   try {
     const data = await api('GET', `/api/errors-history/${id}`);
     currentErrorModalApp = data.app;
+    if (btnSeen) { btnSeen.dataset.app = data.app; btnSeen.style.display = data.seen ? 'none' : ''; }
     document.getElementById('error-title').textContent = `🔴 Erro — ${displayName(data.app)}`;
     document.getElementById('error-body').innerHTML = `
       <div class="section">

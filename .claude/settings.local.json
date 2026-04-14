@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Read(//c/Users/nerias.sousa/.pm2/logs/**)",
-      "Bash(node -e ':*)"
+      "Bash(node -e ':*)",
+      "Bash(pm2 restart:*)"
     ]
   }
 }

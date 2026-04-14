@@ -757,8 +757,46 @@ function pushHistory() {
 }
 
 function pushErrorHistory() {
-  const data = `data: ${JSON.stringify(errorHistory)}\n\n`;
-  errorSSE.forEach(r => { try { r.write(data); } catch {} });
+  (async () => {
+    try {
+      const list = await fetchErrorsFromDB();
+      const data = `data: ${JSON.stringify(list)}\n\n`;
+      errorSSE.forEach(r => { try { r.write(data); } catch {} });
+    } catch (e) {
+      console.error('[pushErrorHistory] erro ao buscar DB:', e.message);
+    }
+  })();
+}
+
+async function fetchErrorsFromDB() {
+  try {
+    const pool = await getPool();
+    const eRes = await pool.request().query(`
+      SELECT TOP 200
+        ID_ERRO, APLICACAO, TIPO, ORIGEM, DETALHE, RESUMO, DTVISTO,
+        FORMAT(DTINC, 'dd/MM/yyyy HH:mm:ss') AS TEMPO
+      FROM dbo.CINI_MANAGER_ERRO_HISTORICO
+      ORDER BY ID_ERRO DESC
+    `);
+    const list = [];
+    let seq = 0;
+    for (const r of eRes.recordset) {
+      list.push({
+        id:      ++seq,
+        time:    r.TEMPO,
+        app:     r.APLICACAO,
+        type:    r.TIPO   || 'runtime',
+        source:  r.ORIGEM || '',
+        detail:  r.DETALHE || '',
+        preview: r.RESUMO  || trimText(r.DETALHE || '', 170),
+        seen:    !!r.DTVISTO,
+      });
+    }
+    return list;
+  } catch (e) {
+    console.error('[db] fetchErrorsFromDB:', e.message);
+    return [];
+  }
 }
 
 function addDeployHistory(rec) {
@@ -808,6 +846,10 @@ function addErrorHistory(entry) {
                 VALUES (@aplicacao, @tipo, @origem, @detalhe, @resumo, GETDATE())`);
     } catch (e) {
       console.error('[db] addErrorHistory ERRO:', e.message);
+      // remove da memória para não mostrar o que não foi salvo no banco
+      const idx = errorHistory.indexOf(rec);
+      if (idx !== -1) errorHistory.splice(idx, 1);
+      pushErrorHistory();
     }
   })();
 }
@@ -817,12 +859,13 @@ async function ackErrorsInDB(appName) {
     const pool = await getPool();
     const req = pool.request();
     req.input('aplicacao', sql.NVarChar(100), appName);
-    await req.query(`
+    const result = await req.query(`
       UPDATE dbo.CINI_MANAGER_ERRO_HISTORICO
       SET    DTVISTO = GETDATE()
       WHERE  APLICACAO = @aplicacao
         AND  DTVISTO IS NULL
     `);
+    console.log(`[db] ackErrorsInDB app="${appName}" linhas atualizadas=${result.rowsAffected?.[0] ?? '?'}`);
   } catch (e) {
     console.error('[db] ack errors:', e.message);
   }
@@ -1836,25 +1879,47 @@ app.get('/api/apps', async (req, res) => {
 });
 
 app.get('/api/apps/:name/error-detail', (req, res) => {
-  const { name } = req.params;
-  const latest = errorHistory.find(item => item.app === name) || null;
-  const recent = errorHistory.filter(item => item.app === name).slice(0, 12);
-  const runtime = getRuntimeAlert(name);
-  const deployErr = deployHistory.find(item => item.app === name && item.status === 'error');
-  const fromBuffer = getLatestErrorFromBuffer(name);
-  const pm2ErrorTail = readPm2ErrorLog(name, 80);
-  const latestFullDetail = pm2ErrorTail || latest?.detail || fromBuffer || runtime?.reason || pollErrors[name] || (deployErr ? deployErr.detail : null) || null;
+  (async () => {
+    const { name } = req.params;
+    try {
+      const pool = await getPool();
+      const r = await pool.request().input('aplicacao', sql.NVarChar(100), name).query(`
+        SELECT TOP 12 ID_ERRO, APLICACAO, TIPO, ORIGEM, DETALHE, RESUMO, DTVISTO,
+          FORMAT(DTINC, 'dd/MM/yyyy HH:mm:ss') AS TEMPO
+        FROM dbo.CINI_MANAGER_ERRO_HISTORICO
+        WHERE APLICACAO = @aplicacao
+        ORDER BY ID_ERRO DESC
+      `);
+      const recent = r.recordset.map((row, i) => ({
+        id: i+1,
+        time: row.TEMPO,
+        app: row.APLICACAO,
+        type: row.TIPO || 'runtime',
+        source: row.ORIGEM || '',
+        detail: row.DETALHE || '',
+        preview: row.RESUMO || trimText(row.DETALHE || '', 170),
+        seen: !!row.DTVISTO,
+      }));
 
-  res.json({
-    app: name,
-    latest,
-    latestFullDetail,
-    pm2ErrorTail,
-    runtimeAlert: runtime,
-    gitError: pollErrors[name] || null,
-    deployError: deployErr ? deployErr.detail : null,
-    recent,
-  });
+      const latest = recent[0] || null;
+      const runtime = getRuntimeAlert(name);
+      const deployErr = deployHistory.find(item => item.app === name && item.status === 'error');
+      const fromBuffer = getLatestErrorFromBuffer(name);
+      const pm2ErrorTail = readPm2ErrorLog(name, 80);
+      const latestFullDetail = pm2ErrorTail || latest?.detail || fromBuffer || runtime?.reason || pollErrors[name] || (deployErr ? deployErr.detail : null) || null;
+
+      res.json({
+        app: name,
+        latest,
+        latestFullDetail,
+        pm2ErrorTail,
+        runtimeAlert: runtime,
+        gitError: pollErrors[name] || null,
+        deployError: deployErr ? deployErr.detail : null,
+        recent,
+      });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  })();
 });
 
 app.post('/api/apps/:name/:action', async (req, res) => {
@@ -1882,7 +1947,15 @@ app.post('/api/apps/:name/:action', async (req, res) => {
 
 app.post('/api/apps/:name/ack-errors', (req, res) => {
   const { name } = req.params;
-  if (!APP_REGISTRY[name]) return res.status(404).json({ error: 'App não encontrado' });
+  console.log(`[ack] recebido para app="${name}", no registry=${!!APP_REGISTRY[name]}`);
+  if (!APP_REGISTRY[name]) {
+    console.warn(`[ack] app "${name}" não está no APP_REGISTRY — atualizando só o DB mesmo assim`);
+    ackErrorsInDB(name);
+    acknowledgedAlertAt.set(name, Date.now());
+    errorHistory.filter(e => e.app === name && !e.seen).forEach(e => { e.seen = true; });
+    pushErrorHistory();
+    return res.json({ ok: true, app: name, cleared: true });
+  }
 
   acknowledgedAlertAt.set(name, Date.now());
   runtimeAlerts.delete(name);
@@ -2191,7 +2264,36 @@ app.get('/api/apps/:name/logs', (req, res) => {
 });
 
 app.get('/api/deploy-history', (req, res) => res.json(deployHistory));
-app.get('/api/errors-history', (req, res) => res.json(errorHistory));
+app.get('/api/errors-history', async (req, res) => {
+  try {
+    const list = await fetchErrorsFromDB();
+    res.json(list);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/errors-history/stream', async (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+  try {
+    const list = await fetchErrorsFromDB();
+    res.write(`data: ${JSON.stringify(list)}\n\n`);
+  } catch (e) {
+    console.error('[errors-history/stream] erro ao buscar DB:', e.message);
+    res.write(`data: []\n\n`);
+  }
+
+  errorSSE.push(res);
+  const keepalive = setInterval(() => {
+    try { res.write(': keepalive\n\n'); } catch { clearInterval(keepalive); }
+  }, 15000);
+  req.on('close', () => {
+    clearInterval(keepalive);
+    const i = errorSSE.indexOf(res);
+    if (i !== -1) errorSSE.splice(i, 1);
+  });
+});
 app.get('/api/errors-history/:id', (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'ID inválido' });
@@ -2220,25 +2322,6 @@ app.get('/api/deploy-history/stream', (req, res) => {
   req.on('close', () => {
     const i = historySSE.indexOf(res);
     if (i !== -1) historySSE.splice(i, 1);
-  });
-});
-
-app.get('/api/errors-history/stream', (req, res) => {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
-  res.flushHeaders();
-  res.write(`data: ${JSON.stringify(errorHistory)}\n\n`);
-
-  errorSSE.push(res);
-  const keepalive = setInterval(() => {
-    try { res.write(': keepalive\n\n'); } catch { clearInterval(keepalive); }
-  }, 15000);
-  req.on('close', () => {
-    clearInterval(keepalive);
-    const i = errorSSE.indexOf(res);
-    if (i !== -1) errorSSE.splice(i, 1);
   });
 });
 
