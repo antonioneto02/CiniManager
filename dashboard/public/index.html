@@ -1444,7 +1444,12 @@ function renderDeployHistory(hist) {
 
 function renderErrorHistory(hist) {
   const el = document.getElementById('history');
-  const active = apps.filter(a => a.hasAttention).map(a => ({
+  const active = apps.filter(a => {
+    if (!a.hasAttention) return false;
+    const ackTime = dismissedApps.get(a.name);
+    if (ackTime != null && (a.attentionTs || 0) <= ackTime) return false;
+    return true;
+  }).map(a => ({
     id: `active:${a.name}`,
     app: a.name,
     source: a.attentionType || 'runtime',
