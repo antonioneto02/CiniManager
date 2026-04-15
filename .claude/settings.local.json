@@ -15,7 +15,8 @@
       "Bash(ipconfig)",
       "Read(//c/Projetos/Confirmacao_Pix/NotificadorPIX/**)",
       "Bash(grep -E \"\\\\.\\(js|json\\)$\")",
-      "Bash(grep -n \"\\\\.on\\\\|\\\\.once\\\\|addEventListener\\\\|removeListener\\\\|removeAllListeners\" \"C:\\\\Projetos\\\\Confirmacao_Pix\\\\NotificadorPIX\"/*.js)"
+      "Bash(grep -n \"\\\\.on\\\\|\\\\.once\\\\|addEventListener\\\\|removeListener\\\\|removeAllListeners\" \"C:\\\\Projetos\\\\Confirmacao_Pix\\\\NotificadorPIX\"/*.js)",
+      "Bash(npm install *)"
     ],
     "additionalDirectories": [
       "E:\\Projetos\\Central-Notificacoes\\whatsapp-bot",
