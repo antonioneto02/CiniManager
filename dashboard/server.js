@@ -1832,7 +1832,34 @@ async function pollGitUpdates() {
       const localHash  = await gitAsync('rev-parse HEAD', gitRoot);
       const remoteHash = await gitAsync(`rev-parse origin/${branch}`, gitRoot);
 
-      if (!localHash || !remoteHash || localHash === remoteHash) continue;
+      if (!localHash || !remoteHash || localHash === remoteHash) {
+        // Detecta quando o código foi commitado+pushado direto do servidor:
+        // local == remoto mas o processo está rodando código mais antigo que o último commit
+        if (localHash && remoteHash && localHash === remoteHash) {
+          const commitTsRaw = await gitAsync('log -1 --format=%ct', gitRoot);
+          const commitMs = commitTsRaw ? parseInt(commitTsRaw) * 1000 : null;
+          if (commitMs) {
+            const list = await pm2List();
+            const proc = list.find(p => p.name === appName);
+            const pmUptime = proc?.pm2_env?.pm_uptime;
+            if (pmUptime && commitMs > pmUptime && proc?.pm2_env?.status === 'online') {
+              console.log(`[poll] ${appName}: processo desatualizado — commit ${new Date(commitMs).toISOString()} > start ${new Date(pmUptime).toISOString()}`);
+              bufferLog(appName, 'deploy', `🔄 Código atualizado no servidor — processo desatualizado, reiniciando...`);
+              await sendWhatsApp(
+                `🔄 *Reinício automático* — ${appLabel(appName)}\n📅 ${now()}\n` +
+                `📦 *Branch:* ${branch}\n` +
+                `🔑 *Commit:* \`${localHash.slice(0, 7)}\`\n` +
+                `📝 Código no servidor mais recente que o processo em execução\n⏳ Reiniciando...`
+              );
+              await deployApp(appName);
+              if (!autoPollCfg.apps[appName]) autoPollCfg.apps[appName] = {};
+              autoPollCfg.apps[appName].lastHash = localHash.slice(0, 7);
+              saveAutoPoll();
+            }
+          }
+        }
+        continue;
+      }
       const pendingRaw = await gitAsync(`log ${localHash}..${remoteHash} --format=%h|||%s|||%an`, gitRoot);
       const pending = pendingRaw ? pendingRaw.split('\n').filter(Boolean).map(l => {
         const [h, s, a] = l.split('|||');
