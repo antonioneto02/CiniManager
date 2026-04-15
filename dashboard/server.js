@@ -287,7 +287,7 @@ const APP_REGISTRY = {
 
 const DEPLOY_EXCLUDE    = new Set(['log-watcher']);
 const STAGED_DEPLOY_APPS = new Set(['cini-dashboard']); 
-const NOTIFY_EXCLUDE = new Set(['log-watcher', 'cini-dashboard']);
+const NOTIFY_EXCLUDE = new Set(['log-watcher']);
 const AUTOPOLL_FILE = path.join(__dirname, '.autopoll.json');
 const CARD_ORDER_FILE = path.join(__dirname, '.card-order.json');
 const DISPLAY_NAMES = {
