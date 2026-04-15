@@ -9,7 +9,6 @@
     "hub-cini",
     "cini-pricing",
     "api-sicredi",
-    "cini-dashboard",
     "notificador-pix",
     "whatsapp-bot",
     "webhook-whatsapp",
@@ -17,6 +16,7 @@
     "portal-streamlit",
     "gerenciador-cargas",
     "whatsapp-motoristas",
-    "whatsapp-webnode"
+    "whatsapp-webnode",
+    "cini-dashboard"
   ]
 }

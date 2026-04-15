@@ -5,3 +5,4 @@ dashboard/.deploy.lock
 logs/
 *.log
 .vscode/
+cini-dashboard-restart-log.txt

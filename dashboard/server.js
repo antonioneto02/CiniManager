@@ -252,10 +252,10 @@ app.use((req, res, next) => {
     return next();
   }
   if (req.path.startsWith('/api/bot/')) {
-    return next(); // autenticado por token em botAuthMiddleware
+    return next(); 
   }
   if (req.path.startsWith('/api/webhook/')) {
-    return next(); // autenticado por token no próprio handler
+    return next(); 
   }
   return ensureAuth(req, res, next);
 });
@@ -287,7 +287,6 @@ const APP_REGISTRY = {
 
 const DEPLOY_EXCLUDE    = new Set(['log-watcher']);
 const STAGED_DEPLOY_APPS = new Set(['cini-dashboard']); 
-// apps to exclude from notification messages and summaries
 const NOTIFY_EXCLUDE = new Set(['log-watcher', 'cini-dashboard']);
 const AUTOPOLL_FILE = path.join(__dirname, '.autopoll.json');
 const CARD_ORDER_FILE = path.join(__dirname, '.card-order.json');
@@ -637,9 +636,9 @@ const logAlertThrottle = new Map();
 const gitAlertThrottle = new Map();
 const recentNotifications = new Map();
 const NOTIFY_DUP_WINDOW_MS = 5 * 60 * 1000; 
-const APP_ERROR_DUP_WINDOW_MS = 5 * 60 * 1000;  // 5 min
-const GIT_ALERT_DUP_WINDOW_MS = 5 * 60 * 1000;  // 5 min
-const PM2_EVENT_DUP_WINDOW_MS = 5 * 60 * 1000;  // 5 min
+const APP_ERROR_DUP_WINDOW_MS = 5 * 60 * 1000; 
+const GIT_ALERT_DUP_WINDOW_MS = 5 * 60 * 1000;  
+const PM2_EVENT_DUP_WINDOW_MS = 5 * 60 * 1000;  
 const ALERT_VISIBLE_MS = 6 * 60 * 60 * 1000;
 const LOG_ERROR_PATTERNS = [
   /(^|\b)(error|exception|fatal|traceback|unhandled|failed|failure|critical|panic)(\b|:)/i,
@@ -670,7 +669,6 @@ const LOG_ERROR_IGNORE_PATTERNS = [
   /not\s+designed\s+for\s+a\s+production\s+environment/i,
   /will\s+leak\s+memory/i,
   /will\s+not\s+scale\s+past\s+a\s+single\s+process/i,
-  // linhas suplementares — complementam o erro anterior, não geram alerta próprio
   /resposta completa:/i,
   /stack trace:/i,
   /traceback \(most recent call last\)/i,

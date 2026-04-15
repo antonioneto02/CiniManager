@@ -209,7 +209,6 @@ function checkResources() {
         const mem = Math.round((proc.monit?.memory ?? 0) / 1024 / 1024);
 
         const problems = [];
-        if (cpu > CPU_LIMIT_PCT) problems.push(`🔥 CPU em *${cpu}%* (limite: ${CPU_LIMIT_PCT}%)`);
         if (mem > MEM_LIMIT_MB)  problems.push(`🧠 Memória em *${mem} MB* (limite: ${MEM_LIMIT_MB} MB)`);
 
         if (problems.length > 0) {

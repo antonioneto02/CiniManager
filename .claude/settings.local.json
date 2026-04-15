@@ -12,10 +12,14 @@
       "Bash(curl -s --connect-timeout 3 http://localhost:3001/dashboard)",
       "Bash(ping -n 1 monitor.hcini.local)",
       "Bash(curl -s --connect-timeout 3 http://monitor.hcini.local:3001/dashboard)",
-      "Bash(ipconfig)"
+      "Bash(ipconfig)",
+      "Read(//c/Projetos/Confirmacao_Pix/NotificadorPIX/**)",
+      "Bash(grep -E \"\\\\.\\(js|json\\)$\")",
+      "Bash(grep -n \"\\\\.on\\\\|\\\\.once\\\\|addEventListener\\\\|removeListener\\\\|removeAllListeners\" \"C:\\\\Projetos\\\\Confirmacao_Pix\\\\NotificadorPIX\"/*.js)"
     ],
     "additionalDirectories": [
-      "E:\\Projetos\\Central-Notificacoes\\whatsapp-bot"
+      "E:\\Projetos\\Central-Notificacoes\\whatsapp-bot",
+      "C:\\Projetos\\Confirmacao_Pix\\NotificadorPIX"
     ]
   }
 }
