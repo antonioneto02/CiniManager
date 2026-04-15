@@ -6,3 +6,5 @@ logs/
 *.log
 .vscode/
 cini-dashboard-restart-log.txt
+dashboard/.autopoll.json
+dashboard/.card-order.json
