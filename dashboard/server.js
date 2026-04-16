@@ -2712,6 +2712,63 @@ app.post('/api/bot/ack', botAuthMiddleware, async (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+app.post('/api/bot/command', botAuthMiddleware, async (req, res) => {
+  const raw = String(req.body.text || '').trim();
+  if (!raw) return res.status(400).json({ error: 'Comando vazio' });
+  const parts = raw.split(/\s+/).filter(Boolean);
+  const cmd = parts[0].toLowerCase();
+
+  try {
+    if (cmd === 'limpar') {
+      const threshold = Math.max(1, parseInt(parts[1], 10) || 1);
+      const list = await pm2List();
+      const candidates = list.filter(p => !p.name.startsWith('pm2-') && !NOTIFY_EXCLUDE.has(p.name) && (p.pm2_env?.restart_time || 0) >= threshold);
+      if (!candidates.length) return res.json({ ok: true, cleared: [], msg: `Nenhum app com restarts >= ${threshold}` });
+
+      const results = [];
+      for (const p of candidates) {
+        const name = p.name;
+        try {
+          await pm2Do('reset', name);
+          addDeployHistory({ time: now(), app: name, status: 'ok', detail: `reset restarts via bot (limpar ${threshold})` });
+          results.push({ app: name, ok: true, restarts: p.pm2_env?.restart_time || 0 });
+        } catch (e) {
+          addDeployHistory({ time: now(), app: name, status: 'error', detail: `reset restarts falhou via bot: ${e.message}` });
+          results.push({ app: name, ok: false, error: e.message });
+        }
+      }
+
+      const okList = results.filter(r => r.ok).map(r => appLabel(r.app));
+      const failed = results.filter(r => !r.ok);
+      if (okList.length || failed.length) {
+        await notifyWhatsApp('🧹 Limpeza de restarts (via WhatsApp)', [
+          `📌 Origem: whatsapp-bot`,
+          `🔢 Threshold: >= ${threshold}`,
+          okList.length ? `✅ Sucesso: ${okList.join(', ')}` : '✅ Sucesso: nenhum',
+          failed.length ? `❌ Falha: ${failed.map(f => `${appLabel(f.app)} (${trimText(f.error,120)})`).join(', ')}` : null,
+        ]);
+      }
+
+      return res.json({ ok: true, threshold, results });
+    }
+
+    if (cmd === 'deploy') {
+      const items = deployHistory.slice(0, 5).map(d => ({ time: d.time, app: d.app, status: d.status, detail: d.detail, label: d.label || appLabel(d.app) }));
+      return res.json({ ok: true, deploys: items });
+    }
+
+    if (cmd === 'erros' || cmd === 'erros?') {
+      const items = errorHistory.slice(0, 5).map(e => ({ id: e.id, time: e.time, app: e.app, type: e.type, preview: e.preview, detail: e.detail, label: e.label || appLabel(e.app) }));
+      return res.json({ ok: true, errors: items });
+    }
+
+    return res.status(400).json({ error: `Comando desconhecido: ${cmd}` });
+  } catch (e) {
+    console.error('[bot/command] erro:', e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
 const WEBHOOK_SECRET = (() => {
   try {
     return require('fs').readFileSync(
