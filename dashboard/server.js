@@ -305,10 +305,10 @@ const DISPLAY_NAMES = {
   'notificador-pix': 'Notificações PIX',
   'whatsapp-bot': 'BOT WhatsApp',
   'portal-consultas': 'Portal de Consultas',
-  'portal-streamlit': 'Portal Stremalit',
+  'portal-streamlit': 'Portal Streamlit',
   'gerenciador-cargas': 'Portal de Cargas',
   'whatsapp-motoristas': 'Tracking',
-  'whatsapp-webnode': 'Pix QR Code',
+  'whatsapp-webnode': 'Cini Notifica BOT',
   'webhook-whatsapp': 'Cini Notifica e WB Sicredi',
 };
 

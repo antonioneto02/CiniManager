@@ -326,7 +326,7 @@ let autoPollRefreshTimer = null;
 let historyMode = 'deploy';
 let deployHistoryItems = [];
 let errorHistoryItems = [];
-const dismissedApps = new Map(); // name -> ackTime (client timestamp)
+const dismissedApps = new Map(); 
 let currentErrorModalApp = null;
 let groups = [];
 let selectedGroupId = 'all';
@@ -364,10 +364,11 @@ const DISPLAY_NAMES = {
   'notificador-pix': 'Notificações PIX',
   'whatsapp-bot': 'BOT WhatsApp',
   'portal-consultas': 'Portal de Consultas',
-  'portal-streamlit': 'Portal Stremalit',
+  'portal-streamlit': 'Portal Streamlit',
   'gerenciador-cargas': 'Portal de Cargas',
   'whatsapp-motoristas': 'Tracking',
-  'whatsapp-webnode': 'Cini Notifica e WB Sicredi',
+  'whatsapp-webnode': 'Cini Notifica BOT',
+  'webhook-whatsapp': 'Cini Notifica e WB Sicredi',
 };
 function displayName(name) { return DISPLAY_NAMES[name] || name; }
 const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
