@@ -56,7 +56,7 @@ module.exports = {
     {
       name: 'portal-streamlit',
       script: 'C:/Users/nerias.sousa/AppData/Local/Programs/Python/Python312/Scripts/streamlit.exe',
-      args: 'run app.py',
+      args: 'run app.py --server.port 8501',
       cwd: 'C:/Projetos/PortalConsultasStreamlit',
       exec_mode: 'fork',
       autorestart: true,
