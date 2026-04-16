@@ -438,6 +438,19 @@ function fmtUptime(ms) {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
+function fmtRestartTime(ms) {
+  if (!ms) return '';
+  const d = new Date(ms);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+  const isYesterday = d.toDateString() === yesterday.toDateString();
+  const hhmm = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  if (isToday) return `hoje ${hhmm}`;
+  if (isYesterday) return `ontem ${hhmm}`;
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + ' ' + hhmm;
+}
+
 async function loadApps() {
   try {
     apps = await api('GET', '/api/apps');
@@ -619,7 +632,7 @@ function renderGrid() {
         <div class="metric"><div class="m-label">Mem</div><div class="m-val" style="color:${memColor}">${a.memory}MB</div></div>
         <div class="metric"><div class="m-label">Uptime</div><div class="m-val">${a.status==='online'?fmtUptime(a.uptime):'-'}</div></div>
       </div>
-      ${a.restarts>0?`<div class="restart-warn">⚠ ${a.restarts} restart(s)</div>`:''}
+      ${a.restarts>0?`<div class="restart-warn">⚠ ${a.restarts} restart(s)${a.lastRestartAt?` — último: ${fmtRestartTime(a.lastRestartAt)}`:''}</div>`:''}
       ${a.lastCommit?`<div class="last-commit" style="cursor:pointer" data-app="${esc(a.name)}" data-hash="${esc(a.lastCommit.hash)}" data-subject="${esc(a.lastCommit.subject||'').replace(/"/g,'&quot;')}" onclick="openDiff(this.dataset.app,this.dataset.hash,this.dataset.subject)" title="Ver diff deste commit"><span class="lc-hash">${esc(a.lastCommit.hash)}</span><span class="lc-subject">${esc(a.lastCommit.subject.length>55?a.lastCommit.subject.slice(0,55)+'…':a.lastCommit.subject)}</span><span class="lc-date">${esc(a.lastCommit.date)}</span></div>`:''}
       <div class="card-actions">
         ${a.status==='online'
