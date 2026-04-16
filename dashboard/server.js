@@ -286,8 +286,9 @@ const APP_REGISTRY = {
 };
 
 const DEPLOY_EXCLUDE    = new Set(['log-watcher']);
-const STAGED_DEPLOY_APPS = new Set(['cini-dashboard']); 
+const STAGED_DEPLOY_APPS = new Set(['cini-dashboard']);
 const NOTIFY_EXCLUDE = new Set(['log-watcher']);
+const HTTPS_APPS = new Set(['whatsapp-webnode', 'webhook-whatsapp', 'whatsapp-motoristas']);
 const AUTOPOLL_FILE = path.join(__dirname, '.autopoll.json');
 const CARD_ORDER_FILE = path.join(__dirname, '.card-order.json');
 const DISPLAY_NAMES = {
@@ -307,7 +308,8 @@ const DISPLAY_NAMES = {
   'portal-streamlit': 'Portal Stremalit',
   'gerenciador-cargas': 'Portal de Cargas',
   'whatsapp-motoristas': 'Tracking',
-  'whatsapp-webnode': 'Cini Notifica e WB Sicredi',
+  'whatsapp-webnode': 'Pix QR Code',
+  'webhook-whatsapp': 'Cini Notifica e WB Sicredi',
 };
 
 function appLabel(name) {
@@ -1248,7 +1250,7 @@ async function waitOnline(name, maxMs = 25000) {
 
 async function httpSmoke(appName, maxMs = 15000) {
   const port = readAppPort(appName);
-  if (!port) return true; 
+  if (!port || HTTPS_APPS.has(appName)) return true;
   const http = require('http');
   const deadline = Date.now() + maxMs;
   while (Date.now() < deadline) {
@@ -1609,13 +1611,14 @@ async function deployApp(appName) {
 
         installDeps(cwd, cwdWin, log);
         let testPassed;
+        let online = false;
         if (STAGED_DEPLOY_APPS.has(appName)) {
           log('deploy', '🧪 Testando em instância temporária antes de subir produção...');
           const staged = await stagedTest(appName, cwdWin, log);
           if (staged) {
             log('deploy', '🚀 Teste OK — promovendo para produção (pm2 reload)...');
             await pm2Reload(appName, log);
-            const online = await waitOnline(appName);
+            online = await waitOnline(appName);
             testPassed = online;
             if (!online) log('deploy', '❌ pm2 reload falhou — produção não ficou online.');
           } else {
@@ -1625,7 +1628,7 @@ async function deployApp(appName) {
           log('deploy', '🧪 Testando código atualizado (restart + verificação)...');
           await pm2Do('restart', appName);
           log('deploy', 'Aguardando processo online...');
-          const online = await waitOnline(appName);
+          online = await waitOnline(appName);
           const httpOkRemote = online ? await (async () => {
             log('deploy', '🌐 Verificando resposta HTTP...');
             const ok = await httpSmoke(appName);
