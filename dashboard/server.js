@@ -1839,7 +1839,11 @@ async function pollGitUpdates() {
         // Detecta quando o código foi commitado+pushado direto do servidor:
         // local == remoto mas o processo está rodando código mais antigo que o último commit
         if (localHash && remoteHash && localHash === remoteHash) {
-          const commitTsRaw = await gitAsync('log -1 --format=%ct', gitRoot);
+          const relPath = path.relative(
+            gitRoot.replace(/\//g, path.sep),
+            cwd.replace(/\//g, path.sep)
+          ).replace(/\\/g, '/') || '.';
+          const commitTsRaw = await gitAsync(`log -1 --format=%ct -- ${relPath}`, gitRoot);
           const commitMs = commitTsRaw ? parseInt(commitTsRaw) * 1000 : null;
           if (commitMs) {
             const list = await pm2List();
@@ -1863,11 +1867,22 @@ async function pollGitUpdates() {
         }
         continue;
       }
+      const relPath = path.relative(
+        gitRoot.replace(/\//g, path.sep),
+        cwd.replace(/\//g, path.sep)
+      ).replace(/\\/g, '/') || '.';
+
       const pendingRaw = await gitAsync(`log ${localHash}..${remoteHash} --format=%h|||%s|||%an`, gitRoot);
       const pending = pendingRaw ? pendingRaw.split('\n').filter(Boolean).map(l => {
         const [h, s, a] = l.split('|||');
         return { hash: h, subject: s, author: a };
       }) : [];
+
+      const affectsApp = await gitAsync(`log ${localHash}..${remoteHash} --format=%h -- ${relPath}`, gitRoot);
+      if (!affectsApp) {
+        console.log(`[poll] ${appName}: ${pending.length} commit(s) no repo mas nenhum afeta '${relPath}' — pulando`);
+        continue;
+      }
 
       const commitList = pending.slice(0, 5)
         .map(c => `  • \`${c.hash}\` ${c.subject} (${c.author})`)
