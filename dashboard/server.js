@@ -1491,7 +1491,10 @@ function installDeps(cwd, cwdWin, log) {
     try {
       const out = execSync('pip install -r requirements.txt --prefer-binary', { cwd, encoding: 'utf8', timeout: 300000 });
       log('deploy', out.trim().split('\n').slice(-3).join('\n') || 'concluído');
-    } catch (e) { throw new Error('pip install falhou: ' + e.message.split('\n')[0]); }
+    } catch (e) {
+      const detail = (e.stderr || e.stdout || e.message || '').toString().split('\n').filter(l => l && !l.startsWith('WARNING')).slice(0, 5).join(' | ');
+      throw new Error('pip install falhou: ' + (detail || e.message.split('\n')[0]));
+    }
   }
 }
 
@@ -1609,7 +1612,7 @@ async function deployApp(appName) {
         const commitAfter = git('rev-parse --short HEAD', gitRoot);
         const changed = commitBefore && commitAfter && commitBefore !== commitAfter;
 
-        installDeps(cwd, cwdWin, log);
+        if (changed) installDeps(cwd, cwdWin, log);
         let testPassed;
         let online = false;
         if (STAGED_DEPLOY_APPS.has(appName)) {
