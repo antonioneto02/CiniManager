@@ -1444,7 +1444,6 @@ function acquireFileLock(appName) {
       const recent = Date.now() - existing.ts < 5 * 60 * 1000;
       const alive  = existing.pid && isPidAlive(existing.pid);
       if (recent && alive) return false;
-      // lock expirado ou processo morto — limpa e prossegue
       fs.unlinkSync(DEPLOY_LOCK_FILE);
     }
     fs.writeFileSync(DEPLOY_LOCK_FILE, JSON.stringify({ appName, ts: Date.now(), pid: process.pid }), 'utf8');
@@ -1456,7 +1455,6 @@ function releaseFileLock() {
   try { fs.unlinkSync(DEPLOY_LOCK_FILE); } catch {}
 }
 
-// Limpa lock fantasma deixado por processo anterior ao iniciar
 try {
   if (fs.existsSync(DEPLOY_LOCK_FILE)) {
     const existing = JSON.parse(fs.readFileSync(DEPLOY_LOCK_FILE, 'utf8'));
@@ -1866,8 +1864,6 @@ async function pollGitUpdates() {
       const remoteHash = await gitAsync(`rev-parse origin/${branch}`, gitRoot);
 
       if (!localHash || !remoteHash || localHash === remoteHash) {
-        // Detecta quando o código foi commitado+pushado direto do servidor:
-        // local == remoto mas o processo está rodando código mais antigo que o último commit
         if (localHash && remoteHash && localHash === remoteHash) {
           const relPath = path.relative(
             gitRoot.replace(/\//g, path.sep),
