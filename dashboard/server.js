@@ -676,6 +676,13 @@ const LOG_ERROR_IGNORE_PATTERNS = [
   /traceback \(most recent call last\)/i,
   /^\s+at\s+/i,
   /^\s+File\s+".*",\s+line\s+\d+/i,
+  /Bad HTTP\/0\.9 request/i,
+  /Bad request syntax/i,
+  /Bad request version/i,
+  /code 400, message Bad/i,
+  /SSH-2\.0-/i,
+  /Ignoring invalid distribution/i,
+  /invalid distribution ~[a-z]/i,
 ];
 
 function rememberRuntimeAlert(appName, type, reason) {
