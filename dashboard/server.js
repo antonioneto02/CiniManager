@@ -1433,11 +1433,19 @@ const deployLock    = new Set();
 const deployHistory = [];
 const DEPLOY_LOCK_FILE = path.join(__dirname, '.deploy.lock');
 
+function isPidAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
 function acquireFileLock(appName) {
   try {
     if (fs.existsSync(DEPLOY_LOCK_FILE)) {
       const existing = JSON.parse(fs.readFileSync(DEPLOY_LOCK_FILE, 'utf8'));
-      if (Date.now() - existing.ts < 5 * 60 * 1000) return false;
+      const recent = Date.now() - existing.ts < 5 * 60 * 1000;
+      const alive  = existing.pid && isPidAlive(existing.pid);
+      if (recent && alive) return false;
+      // lock expirado ou processo morto — limpa e prossegue
+      fs.unlinkSync(DEPLOY_LOCK_FILE);
     }
     fs.writeFileSync(DEPLOY_LOCK_FILE, JSON.stringify({ appName, ts: Date.now(), pid: process.pid }), 'utf8');
     return true;
@@ -1447,6 +1455,18 @@ function acquireFileLock(appName) {
 function releaseFileLock() {
   try { fs.unlinkSync(DEPLOY_LOCK_FILE); } catch {}
 }
+
+// Limpa lock fantasma deixado por processo anterior ao iniciar
+try {
+  if (fs.existsSync(DEPLOY_LOCK_FILE)) {
+    const existing = JSON.parse(fs.readFileSync(DEPLOY_LOCK_FILE, 'utf8'));
+    if (!existing.pid || !isPidAlive(existing.pid)) {
+      fs.unlinkSync(DEPLOY_LOCK_FILE);
+      console.log('[deploy] Lock fantasma removido na inicialização (pid=%d)', existing.pid);
+    }
+  }
+} catch {}
+
 const lastCommitCache = new Map();
 
 async function getLastCommit(appName) {
