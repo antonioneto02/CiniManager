@@ -1489,7 +1489,7 @@ function installDeps(cwd, cwdWin, log) {
   if (fs.existsSync(path.join(cwdWin, 'requirements.txt'))) {
     log('deploy', 'pip install -r requirements.txt...');
     try {
-      const out = execSync('pip install -r requirements.txt', { cwd, encoding: 'utf8', timeout: 120000 });
+      const out = execSync('pip install -r requirements.txt --prefer-binary', { cwd, encoding: 'utf8', timeout: 300000 });
       log('deploy', out.trim().split('\n').slice(-3).join('\n') || 'concluído');
     } catch (e) { throw new Error('pip install falhou: ' + e.message.split('\n')[0]); }
   }
