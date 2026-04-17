@@ -2721,36 +2721,22 @@ app.post('/api/bot/command', botAuthMiddleware, async (req, res) => {
 
   try {
     if (cmd === 'limpar') {
-      const threshold = Math.max(1, parseInt(parts[1], 10) || 1);
+      const appName = parts[1];
+      if (!appName) return res.status(400).json({ error: 'Informe o nome do app' });
+      if (!APP_REGISTRY[appName]) return res.status(404).json({ error: `App "${appName}" não encontrado` });
+
       const list = await pm2List();
-      const candidates = list.filter(p => !p.name.startsWith('pm2-') && !NOTIFY_EXCLUDE.has(p.name) && (p.pm2_env?.restart_time || 0) >= threshold);
-      if (!candidates.length) return res.json({ ok: true, cleared: [], msg: `Nenhum app com restarts >= ${threshold}` });
+      const proc = list.find(p => p.name === appName);
+      const restartsBefore = proc?.pm2_env?.restart_time || 0;
 
-      const results = [];
-      for (const p of candidates) {
-        const name = p.name;
-        try {
-          await pm2Do('reset', name);
-          addDeployHistory({ time: now(), app: name, status: 'ok', detail: `reset restarts via bot (limpar ${threshold})` });
-          results.push({ app: name, ok: true, restarts: p.pm2_env?.restart_time || 0 });
-        } catch (e) {
-          addDeployHistory({ time: now(), app: name, status: 'error', detail: `reset restarts falhou via bot: ${e.message}` });
-          results.push({ app: name, ok: false, error: e.message });
-        }
+      try {
+        await pm2Do('reset', appName);
+        addDeployHistory({ time: now(), app: appName, status: 'ok', detail: `reset restarts via bot (era ${restartsBefore})` });
+        return res.json({ ok: true, app: appName, restarts: restartsBefore });
+      } catch (e) {
+        addDeployHistory({ time: now(), app: appName, status: 'error', detail: `reset restarts falhou via bot: ${e.message}` });
+        return res.status(500).json({ error: e.message });
       }
-
-      const okList = results.filter(r => r.ok).map(r => appLabel(r.app));
-      const failed = results.filter(r => !r.ok);
-      if (okList.length || failed.length) {
-        await notifyWhatsApp('🧹 Limpeza de restarts (via WhatsApp)', [
-          `📌 Origem: whatsapp-bot`,
-          `🔢 Threshold: >= ${threshold}`,
-          okList.length ? `✅ Sucesso: ${okList.join(', ')}` : '✅ Sucesso: nenhum',
-          failed.length ? `❌ Falha: ${failed.map(f => `${appLabel(f.app)} (${trimText(f.error,120)})`).join(', ')}` : null,
-        ]);
-      }
-
-      return res.json({ ok: true, threshold, results });
     }
 
     if (cmd === 'deploy') {
