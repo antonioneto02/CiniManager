@@ -283,6 +283,8 @@ const APP_REGISTRY = {
   'whatsapp-motoristas':  'E:/Projetos/Central-Notificacoes/WhatsAppMotoristas',
   'whatsapp-webnode':     'E:/Projetos/Central-Notificacoes/WhatsAppWebNode',
   'central-notificacoes': 'E:/Projetos/Central-Notificacoes/CentralNotificacoes',
+  'portal-vagas-rh':      'E:/Projetos/PortalVagasRH',
+  'portal-api':           'E:/Projetos/portalApi',
 };
 
 const DEPLOY_EXCLUDE    = new Set(['log-watcher']);
@@ -310,6 +312,8 @@ const DISPLAY_NAMES = {
   'whatsapp-motoristas': 'Tracking',
   'whatsapp-webnode': 'Cini Notifica BOT',
   'webhook-whatsapp': 'Cini Notifica e WB Sicredi',
+  'portal-vagas-rh':    'Portal Vagas RH',
+  'portal-api':         'Portal API (Backend)',
 };
 
 function appLabel(name) {
