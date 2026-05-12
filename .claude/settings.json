@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C \"/e/Projetos/WF_Cini\" add wf_cini/controllers/loginController.js)",
+      "Bash(git -C /e/Projetos/WF_Cini commit -m ' *)",
+      "Bash(git -C \"/e/Projetos/WF_Cini\" push)",
+      "Bash(grep -rn \"groups.*\\\\.get\\\\|\\\\.get.*groups\\\\|session.*\\\\.get\\\\|groups.*json\\\\|json.*groups\" /c/Projetos/gerenciador-cargas/ --include=\"*.py\" ! -path \"*/venv/*\")",
+      "Bash(grep -rn \"groups.*\\\\.get\\\\|\\\\.get.*group\" /c/Projetos/gerenciador-cargas/ --include=\"*.py\" ! -path \"*/venv/*\")",
+      "Bash(git -C \"/c/Projetos/gerenciador-cargas\" add protheus_auth/templatetags/math_filters.py cargas/views.py)",
+      "Bash(git -C /c/Projetos/gerenciador-cargas commit -m ' *)",
+      "Bash(git -C \"/c/Projetos/gerenciador-cargas\" push)",
+      "Read(//mnt/c/Projetos/**)",
+      "Bash(xargs cat *)",
+      "Bash(node -e \"const pm2=require\\('pm2'\\);pm2.connect\\(false,\\(\\)=>{pm2.list\\(\\(_,l\\)=>{console.log\\(JSON.stringify\\(l?.map\\(p=>\\({name:p.name,status:p.pm2_env?.status,port:p.pm2_env?.PORT}\\)\\)\\)\\);pm2.disconnect\\(\\);}\\)}\\)\")"
+    ],
+    "additionalDirectories": [
+      "C:\\Projetos\\gerenciador-cargas\\protheus_auth\\templatetags",
+      "C:\\Projetos\\gerenciador-cargas\\cargas"
+    ]
+  }
+}

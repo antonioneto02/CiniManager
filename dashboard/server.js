@@ -2232,11 +2232,16 @@ app.post('/api/all/:action', async (req, res) => {
 app.get('/api/apps/:name/logfiles', async (req, res) => {
   const { name } = req.params;
   const lines = parseInt(req.query.lines) || 1200;
+  const idx = req.query.idx !== undefined ? parseInt(req.query.idx) : null;
   const results = await getAppLogFiles(name);
   if (!results.length) return res.json([]);
 
+  const toLoad = idx !== null
+    ? (results[idx] ? [results[idx]] : [])
+    : results.slice(0, 4);
+
   const output = [];
-  for (const f of results.slice(0, 4)) {
+  for (const f of toLoad) {
     try {
       const stat = fs.statSync(f.path);
       const TAIL_BYTES = 512 * 1024;
@@ -2254,6 +2259,11 @@ app.get('/api/apps/:name/logfiles', async (req, res) => {
   }
 
   res.json(output);
+});
+
+app.get('/api/apps/:name/logfile-list', async (req, res) => {
+  const files = await getAppLogFiles(req.params.name);
+  res.json(files.map((f, i) => ({ idx: i, label: f.label, source: f.source })));
 });
 
 app.get('/api/apps/:name/git', (req, res) => {

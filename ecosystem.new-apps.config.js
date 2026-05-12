@@ -7,6 +7,9 @@ module.exports = {
       exec_mode: 'fork',
       autorestart: true,
       watch: false,
+      out_file: 'E:/Projetos/Central-Notificacoes/whatsapp-bot/logs/whatsapp-bot.log',
+      error_file: 'E:/Projetos/Central-Notificacoes/whatsapp-bot/logs/whatsapp-bot.log',
+      merge_logs: true,
     },
     {
       name: 'webhook-whatsapp',
@@ -15,6 +18,9 @@ module.exports = {
       exec_mode: 'fork',
       autorestart: true,
       watch: false,
+      out_file: 'C:/Projetos/WebhookWhatsAppNode/logs/pm2-out.log',
+      error_file: 'C:/Projetos/WebhookWhatsAppNode/logs/pm2-error.log',
+      merge_logs: true,
     },
     {
       name: 'portal-consultas',
@@ -23,6 +29,9 @@ module.exports = {
       exec_mode: 'fork',
       autorestart: true,
       watch: false,
+      out_file: 'C:/Projetos/PortalConsultasCini/logs/portal-consultas.log',
+      error_file: 'C:/Projetos/PortalConsultasCini/logs/portal-consultas.log',
+      merge_logs: true,
     },
     {
       name: 'whatsapp-motoristas',
@@ -31,6 +40,9 @@ module.exports = {
       exec_mode: 'fork',
       autorestart: true,
       watch: false,
+      out_file: 'E:/Projetos/Central-Notificacoes/WhatsAppMotoristas/logs/whatsapp-motoristas.log',
+      error_file: 'E:/Projetos/Central-Notificacoes/WhatsAppMotoristas/logs/whatsapp-motoristas.log',
+      merge_logs: true,
     },
     {
       name: 'whatsapp-webnode',
@@ -39,6 +51,9 @@ module.exports = {
       exec_mode: 'fork',
       autorestart: true,
       watch: false,
+      out_file: 'E:/Projetos/Central-Notificacoes/WhatsAppWebNode/logs/whatsapp-webnode.log',
+      error_file: 'E:/Projetos/Central-Notificacoes/WhatsAppWebNode/logs/whatsapp-webnode.log',
+      merge_logs: true,
     },
     {
       name: 'client-baixas-pix',
