@@ -1172,32 +1172,30 @@ async function getAppLogFiles(appName) {
     pushLogFile(files, seen, 'PM2 runtime', env.pm_log_path, 'pm2');
   } catch {}
 
-  if (!files.length) {
-    const cwd = APP_REGISTRY[appName];
-    if (cwd) {
-      const cwdWin = cwd.replace(/\//g, path.sep);
-      const searchDirs = [cwdWin, path.join(cwdWin, 'logs'), path.join(cwdWin, 'log')];
-      for (const dir of searchDirs) {
-        if (!fs.existsSync(dir)) continue;
-        let entries;
-        try { entries = fs.readdirSync(dir); } catch { continue; }
-        for (const f of entries) {
-          if (!f.endsWith('.log')) continue;
-          pushLogFile(files, seen, f, path.join(dir, f), inferLogSource(f));
-        }
+  const cwd = APP_REGISTRY[appName];
+  if (cwd) {
+    const cwdWin = cwd.replace(/\//g, path.sep);
+    const searchDirs = [cwdWin, path.join(cwdWin, 'logs'), path.join(cwdWin, 'log')];
+    for (const dir of searchDirs) {
+      if (!fs.existsSync(dir)) continue;
+      let entries;
+      try { entries = fs.readdirSync(dir); } catch { continue; }
+      for (const f of entries) {
+        if (!f.endsWith('.log')) continue;
+        pushLogFile(files, seen, f, path.join(dir, f), inferLogSource(f));
       }
     }
+  }
 
-    const pm2Home = process.env.PM2_HOME || path.join(process.env.USERPROFILE || 'C:/Users/nerias.sousa', '.pm2');
-    const pm2LogDir = path.join(pm2Home, 'logs');
-    if (fs.existsSync(pm2LogDir)) {
-      try {
-        const entries = fs.readdirSync(pm2LogDir).filter(f => f.startsWith(appName + '-') && f.endsWith('.log'));
-        for (const f of entries) {
-          pushLogFile(files, seen, `PM2: ${f}`, path.join(pm2LogDir, f), inferLogSource(f), 0);
-        }
-      } catch {}
-    }
+  const pm2Home = process.env.PM2_HOME || path.join(process.env.USERPROFILE || 'C:/Users/nerias.sousa', '.pm2');
+  const pm2LogDir = path.join(pm2Home, 'logs');
+  if (fs.existsSync(pm2LogDir)) {
+    try {
+      const entries = fs.readdirSync(pm2LogDir).filter(f => f.startsWith(appName + '-') && f.endsWith('.log'));
+      for (const f of entries) {
+        pushLogFile(files, seen, `PM2: ${f}`, path.join(pm2LogDir, f), inferLogSource(f), 0);
+      }
+    } catch {}
   }
 
   files.sort((a, b) => b.mtime - a.mtime);
