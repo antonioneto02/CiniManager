@@ -1520,13 +1520,11 @@ function getUnpushedCommits(cwd) {
 
 function installDeps(cwd, cwdWin, log) {
   if (fs.existsSync(path.join(cwdWin, 'package.json'))) {
-    log('deploy', 'npm install --omit=dev...');
-    const pkgLock = path.join(cwdWin, 'node_modules', '.package-lock.json');
-    if (fs.existsSync(pkgLock)) {
-      try { fs.unlinkSync(pkgLock); } catch (_) {}
-    }
+    const hasLockFile = fs.existsSync(path.join(cwdWin, 'package-lock.json'));
+    const cmd = hasLockFile ? 'npm ci --omit=dev' : 'npm install --omit=dev --no-package-lock';
+    log('deploy', cmd + '...');
     try {
-      const out = execSync('npm install --omit=dev', { cwd, encoding: 'utf8', timeout: 120000 });
+      const out = execSync(cmd, { cwd, encoding: 'utf8', timeout: 120000 });
       log('deploy', out.trim() || 'concluído');
     } catch (e) { throw new Error('npm install falhou: ' + e.message.split('\n')[0]); }
   }
