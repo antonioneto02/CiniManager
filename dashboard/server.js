@@ -1357,6 +1357,23 @@ function gitAsync(args, cwd, interactive, timeoutMs) {
   });
 }
 
+function gitFetch(cwd, timeoutMs = 20000) {
+  return new Promise(resolve => {
+    execFile('git', ['fetch', '--quiet'], {
+      cwd, encoding: 'utf8',
+      timeout: timeoutMs,
+      env: GIT_ENV,
+    }, (err, _stdout, stderr) => {
+      if (!err) return resolve({ ok: true });
+      const msg = (stderr || err.message || '').trim();
+      if (err.killed || /timed? ?out/i.test(msg)) return resolve({ ok: false, reason: 'git fetch timeout' });
+      if (/authentication|auth|403|401|credential|password|token/i.test(msg)) return resolve({ ok: false, reason: 'git fetch falhou (autenticação)' });
+      if (/could not resolve|unable to connect|network|ETIMEDOUT|ECONNREFUSED/i.test(msg)) return resolve({ ok: false, reason: 'git fetch falhou (rede)' });
+      return resolve({ ok: false, reason: `git fetch falhou: ${msg.split('\n')[0].slice(0, 120)}` });
+    });
+  });
+}
+
 function findGitRoot(appCwd) {
   const cwdWin = appCwd.replace(/\//g, path.sep);
   if (fs.existsSync(path.join(cwdWin, '.git'))) return appCwd;
@@ -1850,12 +1867,12 @@ async function pollGitUpdates() {
     if (!gitRoot) continue;
 
     try {
-      const fetchOk = await gitAsync('fetch --quiet', gitRoot, false, 8000);
-      if (fetchOk === null) {
-        pollErrors[appName] = 'git fetch falhou (autenticação?)';
+      const fetchResult = await gitFetch(gitRoot);
+      if (!fetchResult.ok) {
+        pollErrors[appName] = fetchResult.reason;
         pollErrorAt[appName] = Date.now();
-        console.error(`[poll] ${appName}: git fetch falhou`);
-        await notifyGitPollError(appName, pollErrors[appName]);
+        console.error(`[poll] ${appName}: ${fetchResult.reason}`);
+        await notifyGitPollError(appName, fetchResult.reason);
         continue;
       }
       delete pollErrors[appName];
@@ -1975,7 +1992,6 @@ const KNOWN_PORTS = {
   'gerenciador-cargas':   8502,
   'central-notificacoes': 5000,
   'cini-dashboard':       9999,
-  'portal-vagas-rh':      3020,
 };
 
 function readAppPort(appName) {
@@ -2121,7 +2137,7 @@ app.get('/api/apps/:name/error-detail', (req, res) => {
 
 app.post('/api/apps/:name/ack-errors', async (req, res) => {
   const { name } = req.params;
-  console.log(`[ack] recebido para app="${name}", no registry=${!!APP_REGISTRY[name]}`);
+  console.log(`[ack] recebido para app="${name}", no registry=${!APP_REGISTRY[name]}`);
   try {
     runtimeAlerts.delete(name);
     delete pollErrors[name];
