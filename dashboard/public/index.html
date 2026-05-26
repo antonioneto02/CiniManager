@@ -355,6 +355,7 @@ function getAppUrl(app) {
   if (app.name === 'cini-dashboard') return '/';
   if (app.name === 'portal-consultas') return `https://${location.hostname}:${app.port}`;
   if (app.name === 'portal-vagas-rh') return `https://consultas.cini.com.br:${app.port}`;
+  if (app.name === 'portal-ete') return `http://consultas.cini.com.br:${app.port}`;
   return `http://${location.hostname}:${app.port}`;
 }
 

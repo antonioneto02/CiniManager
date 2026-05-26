@@ -241,5 +241,17 @@ module.exports = {
       merge_logs: true,
       env: { NODE_ENV: 'production', PORT: 3008 },
     },
+    {
+      name: 'portal-ete',
+      script: 'app.js',
+      cwd: 'E:/Projetos/portalETE',
+      exec_mode: 'fork',
+      autorestart: true,
+      watch: false,
+      out_file: 'E:/Projetos/portalETE/logs/portal-ete.log',
+      error_file: 'E:/Projetos/portalETE/logs/portal-ete.log',
+      merge_logs: true,
+      env: { NODE_ENV: 'production', PORT: 3021 },
+    },
   ],
 };

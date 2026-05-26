@@ -285,6 +285,7 @@ const APP_REGISTRY = {
   'central-notificacoes': 'E:/Projetos/Central-Notificacoes/CentralNotificacoes',
   'portal-vagas-rh':      'E:/Projetos/PortalVagasRH',
   'portal-api':           'E:/Projetos/portalApi',
+  'portal-ete':           'E:/Projetos/portalETE',
 };
 
 const DEPLOY_EXCLUDE    = new Set(['log-watcher']);
@@ -314,6 +315,7 @@ const DISPLAY_NAMES = {
   'webhook-whatsapp': 'Cini Notifica e WB Sicredi',
   'portal-vagas-rh':    'Portal Vagas RH',
   'portal-api':         'Portal API (Backend)',
+  'portal-ete':         'Portal ETE',
 };
 
 function appLabel(name) {
@@ -1990,6 +1992,7 @@ const KNOWN_PORTS = {
   'gerenciador-cargas':   8502,
   'central-notificacoes': 5000,
   'cini-dashboard':       9999,
+  'portal-ete':           3021,
 };
 
 function readAppPort(appName) {
