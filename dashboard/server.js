@@ -1877,6 +1877,7 @@ async function pollGitUpdates() {
   const startedAt = now();
   console.log(`[poll] Verificando atualizações em ${Object.keys(APP_REGISTRY).length} apps...`);
 
+  const fetchedRoots = new Map(); // gitRoot → fetchResult (dedup por ciclo)
   let consecutiveTimeouts = 0;
   for (const [appName, cwd] of Object.entries(APP_REGISTRY)) {
     if (DEPLOY_EXCLUDE.has(appName)) continue;
@@ -1888,20 +1889,25 @@ async function pollGitUpdates() {
     if (!gitRoot) continue;
 
     try {
-      const fetchResult = await gitFetch(gitRoot);
+      let fetchResult;
+      if (fetchedRoots.has(gitRoot)) {
+        fetchResult = fetchedRoots.get(gitRoot);
+      } else {
+        fetchResult = await gitFetch(gitRoot);
+        fetchedRoots.set(gitRoot, fetchResult);
+      }
       if (!fetchResult.ok) {
         pollErrors[appName] = fetchResult.reason;
         pollErrorAt[appName] = Date.now();
         console.error(`[poll] ${appName}: ${fetchResult.reason}`);
         await notifyGitPollError(appName, fetchResult.reason);
-        if (fetchResult.reason === 'git fetch timeout') {
+        if (fetchResult.reason === 'git fetch timeout' && !fetchedRoots.has(gitRoot + '_counted')) {
+          fetchedRoots.set(gitRoot + '_counted', true);
           consecutiveTimeouts++;
           if (consecutiveTimeouts >= 3) {
-            console.error('[poll] 3+ timeouts consecutivos — provável problema de rede. Abortando ciclo.');
+            console.error('[poll] 3+ repos com timeout — provável problema de rede. Abortando ciclo.');
             break;
           }
-        } else {
-          consecutiveTimeouts = 0;
         }
         continue;
       }
