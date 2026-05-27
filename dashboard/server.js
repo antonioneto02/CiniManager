@@ -1034,9 +1034,10 @@ async function loadHistoriesFromDB() {
   }
 }
 
-function bufferLog(appName, source, text) {
+function bufferLog(appName, source, text, fileLabel) {
   if (!logBuffers[appName]) logBuffers[appName] = [];
   const entry = { time: new Date().toISOString(), source, text };
+  if (fileLabel) entry.file = fileLabel; // label do arquivo de origem (para filtragem no frontend)
   logBuffers[appName].push(entry);
   if (logBuffers[appName].length > LOG_MAX) logBuffers[appName].shift();
   (sseClients[appName] || []).forEach(r => {
@@ -2454,8 +2455,10 @@ function consumeFileTail(fp) {
     st.size = newStat.size;
 
     const lines = buf.toString('utf8').split('\n').filter(Boolean);
-    for (const [app, source] of st.watchers.entries()) {
-      for (const line of lines) bufferLog(app, source, line.trim());
+    for (const [app, info] of st.watchers.entries()) {
+      const source = (info && typeof info === 'object') ? info.source : info;
+      const label  = (info && typeof info === 'object') ? info.label  : null;
+      for (const line of lines) bufferLog(app, source, line.trim(), label);
     }
   } catch {}
   st.reading = false;
@@ -2471,7 +2474,7 @@ async function startFileTail(appName) {
         fileTailState[fp] = { size: stat.size, watchers: new Map(), watcher: null, poller: null, reading: false };
       } catch { continue; }
     }
-    fileTailState[fp].watchers.set(appName, f.source || 'stdout');
+    fileTailState[fp].watchers.set(appName, { source: f.source || 'stdout', label: f.label });
     if (!fileTailState[fp].watcher) {
       fileTailState[fp].watcher = fs.watch(fp, { persistent: false }, () => consumeFileTail(fp));
     }

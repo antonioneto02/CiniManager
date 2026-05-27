@@ -335,25 +335,19 @@ mark.log-hl{background:#d29922;color:#000;border-radius:2px;padding:0 2px;font-s
     </div>
     <div class="modal-body">
       <div class="section">
-        <div class="section-title">Período de busca</div>
+        <div class="section-title">Período de busca (horário Brasília — BRT)</div>
         <p style="color:var(--muted);font-size:12px;margin-bottom:14px">
-          Busca recebimentos PIX na API do Itaú para o período selecionado e salva na Z16 os que ainda não estiverem registrados.
+          Busca recebimentos PIX na API do Itaú para o período selecionado e salva na Z16 os que ainda não estiverem registrados. Os horários são sempre em <strong>BRT (UTC-3)</strong>.
         </p>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
           <div>
-            <div class="section-title" style="margin-bottom:4px">Data</div>
-            <input id="pf-date" type="date"
-              style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:7px 9px;font-family:inherit;font-size:12px" />
-          </div>
-          <div></div>
-          <div>
-            <div class="section-title" style="margin-bottom:4px">De (hora início)</div>
-            <input id="pf-from" type="time"
+            <div class="section-title" style="margin-bottom:4px">Início (BRT)</div>
+            <input id="pf-inicio" type="datetime-local"
               style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:7px 9px;font-family:inherit;font-size:12px" />
           </div>
           <div>
-            <div class="section-title" style="margin-bottom:4px">Até (hora fim)</div>
-            <input id="pf-to" type="time"
+            <div class="section-title" style="margin-bottom:4px">Fim (BRT)</div>
+            <input id="pf-fim" type="datetime-local"
               style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:7px 9px;font-family:inherit;font-size:12px" />
           </div>
         </div>
@@ -1297,8 +1291,33 @@ function connectLogSSE(name) {
   if (sse) { sse.close(); sse = null; }
   sse = new EventSource(`/api/apps/${name}/logs`);
   sse.onmessage = e => {
-    const {time, source, text} = JSON.parse(e.data);
+    const entry = JSON.parse(e.data);
+    const { time, source, text, file } = entry;
+
+    // Filtra pelo tab ativo: entradas com label de arquivo só aparecem
+    // se o tab selecionado corresponde a esse arquivo.
+    // Entradas sem label (PM2 bus: stdout/stderr/pm2) sempre aparecem
+    // exceto quando o tab ativo é um arquivo específico.
+    if (file) {
+      const activeLabel = (activeLogFileIdx !== null && logFileList[activeLogFileIdx])
+        ? logFileList[activeLogFileIdx].label
+        : null;
+      if (file !== activeLabel) return; // descarta entradas de outros arquivos
+    } else if (activeLogFileIdx !== null && logFileList[activeLogFileIdx]) {
+      // Entrada do PM2 bus (sem file): mostra apenas se o tab ativo é o principal (idx 0)
+      // ou se o arquivo do tab ativo é o mesmo log do PM2
+      const activeLabel = logFileList[activeLogFileIdx].label || '';
+      const isMainPm2Tab = activeLabel.includes('client-baixas-pix') || activeLabel.startsWith('PM2');
+      if (!isMainPm2Tab) return;
+    }
+
     appendLine(source, text, time);
+
+    // Para o stream automaticamente quando o fallback conclui
+    if (file && file.includes('fallback_pix') && text && text.includes('FALLBACK CONCLUIDO')) {
+      appendSeparator('✅ Fallback concluido — stream encerrado');
+      if (sse) { sse.close(); sse = null; }
+    }
   };
   sse.onerror = () => {
     if (sse) { sse.close(); sse = null; }
@@ -1820,27 +1839,40 @@ async function closeErrorModal() {
 document.getElementById('error-modal').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeErrorModal(); });
 
 // ─── Fallback manual Baixas PIX ──────────────────────────────────────────────
+// Converte timestamp UTC (ms) para string datetime-local no fuso BRT (UTC-3),
+// independente do timezone do browser.
+function utcMsToBrtDtLocal(utcMs) {
+  const BRT_OFFSET_MS = -3 * 60 * 60 * 1000; // UTC-3
+  const brtMs = utcMs + BRT_OFFSET_MS;        // desloca -3h
+  const d = new Date(brtMs);
+  const yyyy = d.getUTCFullYear();
+  const mm   = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd   = String(d.getUTCDate()).padStart(2, '0');
+  const hh   = String(d.getUTCHours()).padStart(2, '0');
+  const min  = String(d.getUTCMinutes()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
+}
+
+// Converte string datetime-local em BRT para UTC ISO 8601 (adiciona 3h).
+function brtDtLocalToUtcIso(dtLocal) {
+  // dtLocal = "YYYY-MM-DDTHH:MM" (em BRT)
+  // Interpreta como UTC (via sufixo Z) para obter ms, depois soma +3h
+  const brtAsIfUtcMs = new Date(dtLocal + ':00Z').getTime();
+  const actualUtcMs  = brtAsIfUtcMs + 3 * 60 * 60 * 1000;
+  return new Date(actualUtcMs).toISOString().replace(/\.\d{3}Z$/, '.000Z');
+}
+
 function pixFallbackSetDefault() {
-  // Preenche com as últimas 4 horas em horário local (Itaú API aceita UTC; convertemos ao enviar)
-  const now  = new Date();
-  const from = new Date(now.getTime() - 4 * 60 * 60 * 1000);
+  const nowMs  = Date.now();
+  const fromMs = nowMs - 4 * 60 * 60 * 1000;
 
-  const toDateStr  = now.toISOString().slice(0, 10);
-  const toTimeStr  = now.toTimeString().slice(0, 5);
-  const fromTimeStr = from.toTimeString().slice(0, 5);
-  // Se o período cruza meia-noite, usa a data de "from"
-  const fromDateStr = from.toISOString().slice(0, 10);
+  document.getElementById('pf-inicio').value = utcMsToBrtDtLocal(fromMs);
+  document.getElementById('pf-fim').value    = utcMsToBrtDtLocal(nowMs);
 
-  // Simplificação: usa a data de agora para ambos (caso típico intra-dia).
-  // Se "from" for de ontem, mostra hint explicativo.
-  document.getElementById('pf-date').value = toDateStr;
-  document.getElementById('pf-from').value = fromTimeStr;
-  document.getElementById('pf-to').value   = toTimeStr;
-
-  const crossesMidnight = fromDateStr !== toDateStr;
-  document.getElementById('pf-hint').textContent = crossesMidnight
-    ? `⚠️ O período cruza meia-noite. Início real: ${fromDateStr} ${fromTimeStr} (UTC-3 → ajustado ao enviar).`
-    : `Últimas 4 horas: ${fromDateStr} ${fromTimeStr} → ${toDateStr} ${toTimeStr} (horário local, Brasília).`;
+  const fromBrt = utcMsToBrtDtLocal(fromMs).replace('T', ' ');
+  const nowBrt  = utcMsToBrtDtLocal(nowMs).replace('T', ' ');
+  document.getElementById('pf-hint').textContent =
+    `Ultimas 4h: ${fromBrt} -> ${nowBrt} (Brasilia, UTC-3)`;
 }
 
 function openPixFallbackModal() {
@@ -1870,24 +1902,17 @@ async function openFallbackLog() {
 }
 
 async function runPixFallback() {
-  const dateVal = document.getElementById('pf-date').value;
-  const fromVal = document.getElementById('pf-from').value;
-  const toVal   = document.getElementById('pf-to').value;
+  const inicioVal = document.getElementById('pf-inicio').value;
+  const fimVal    = document.getElementById('pf-fim').value;
 
-  if (!dateVal || !fromVal || !toVal) {
-    toast('Preencha data e horários', 'err');
+  if (!inicioVal || !fimVal) {
+    toast('Preencha inicio e fim', 'err');
     return;
   }
 
-  // Monta datetimes locais (fuso Brasília = UTC-3) e converte para UTC ISO
-  function toUtcIso(date, time) {
-    // Cria datetime local (sem indicação de fuso) e converte para UTC
-    const local = new Date(`${date}T${time}:00`);
-    return local.toISOString().replace('.000Z', '.000Z');
-  }
-
-  const inicio = toUtcIso(dateVal, fromVal);
-  const fim    = toUtcIso(dateVal, toVal);
+  // Converte BRT (UTC-3) para UTC, somando +3h fixo (independente do browser)
+  const inicio = brtDtLocalToUtcIso(inicioVal);
+  const fim    = brtDtLocalToUtcIso(fimVal);
 
   if (new Date(inicio) >= new Date(fim)) {
     toast('Horário de início deve ser anterior ao fim', 'err');
