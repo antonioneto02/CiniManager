@@ -326,6 +326,48 @@ mark.log-hl{background:#d29922;color:#000;border-radius:2px;padding:0 2px;font-s
   </div>
 </div>
 
+<!-- ─── Modal: Fallback manual Baixas PIX ─── -->
+<div class="modal-bg" id="pix-fallback-modal">
+  <div class="modal" style="width:480px;max-width:95vw">
+    <div class="modal-head">
+      <span class="modal-head-title">↩ Fallback Manual — Baixas PIX</span>
+      <button class="btn btn-sm" onclick="closePixFallbackModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="section">
+        <div class="section-title">Período de busca</div>
+        <p style="color:var(--muted);font-size:12px;margin-bottom:14px">
+          Busca recebimentos PIX na API do Itaú para o período selecionado e salva na Z16 os que ainda não estiverem registrados.
+        </p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+          <div>
+            <div class="section-title" style="margin-bottom:4px">Data</div>
+            <input id="pf-date" type="date"
+              style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:7px 9px;font-family:inherit;font-size:12px" />
+          </div>
+          <div></div>
+          <div>
+            <div class="section-title" style="margin-bottom:4px">De (hora início)</div>
+            <input id="pf-from" type="time"
+              style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:7px 9px;font-family:inherit;font-size:12px" />
+          </div>
+          <div>
+            <div class="section-title" style="margin-bottom:4px">Até (hora fim)</div>
+            <input id="pf-to" type="time"
+              style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:7px 9px;font-family:inherit;font-size:12px" />
+          </div>
+        </div>
+        <p id="pf-hint" style="color:var(--muted);font-size:11px;margin-top:4px"></p>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-yellow" id="btn-pf-run" onclick="runPixFallback()">▶ Executar Fallback</button>
+      <button class="btn btn-sm" onclick="pixFallbackSetDefault()" title="Resetar para últimas 4 horas">⟳ Últimas 4h</button>
+      <button class="btn" onclick="closePixFallbackModal()">Cancelar</button>
+    </div>
+  </div>
+</div>
+
 <script>
 let apps = [], sse = null, sseLogName = null, autoScroll = true, currentGit = null, logFileList = [], activeLogFileIdx = null;
 let autoPollRefreshTimer = null;
@@ -674,6 +716,8 @@ function renderGrid() {
         ${getAppUrl(a)?`<button class="btn btn-sm btn-green" onclick="window.open('${getAppUrl(a)}','_blank')">🌐 App</button>`:''}
         ${getDocsUrl(a)?`<button class="btn btn-sm btn-blue" onclick="window.open('${getDocsUrl(a)}','_blank')">📖 API</button>`:''}
         <button class="btn btn-sm" onclick="openReadme('${a.name}')">📝 Docs</button>
+        ${a.name==='client-baixas-pix'?`<button class="btn btn-sm btn-yellow" onclick="openPixFallbackModal()" title="Buscar recebimentos PIX e salvar os ausentes na Z16">↩ Fallback PIX</button>`:''}
+        ${a.name==='client-baixas-pix'?`<button class="btn btn-sm" onclick="openFallbackLog()" title="Ver log do fallback manual (logs/fallback_pix.log)">📋 Log FB</button>`:''}
         <button class="btn btn-sm btn-orange" onclick="doDeploy('${a.name}')" ${a.deploying?'disabled':''}>
           ${a.deploying?'<span class="spin"></span>Deploy...':'🚀 Deploy'}
         </button>
@@ -1774,6 +1818,97 @@ async function closeErrorModal() {
   await loadApps();
 }
 document.getElementById('error-modal').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeErrorModal(); });
+
+// ─── Fallback manual Baixas PIX ──────────────────────────────────────────────
+function pixFallbackSetDefault() {
+  // Preenche com as últimas 4 horas em horário local (Itaú API aceita UTC; convertemos ao enviar)
+  const now  = new Date();
+  const from = new Date(now.getTime() - 4 * 60 * 60 * 1000);
+
+  const toDateStr  = now.toISOString().slice(0, 10);
+  const toTimeStr  = now.toTimeString().slice(0, 5);
+  const fromTimeStr = from.toTimeString().slice(0, 5);
+  // Se o período cruza meia-noite, usa a data de "from"
+  const fromDateStr = from.toISOString().slice(0, 10);
+
+  // Simplificação: usa a data de agora para ambos (caso típico intra-dia).
+  // Se "from" for de ontem, mostra hint explicativo.
+  document.getElementById('pf-date').value = toDateStr;
+  document.getElementById('pf-from').value = fromTimeStr;
+  document.getElementById('pf-to').value   = toTimeStr;
+
+  const crossesMidnight = fromDateStr !== toDateStr;
+  document.getElementById('pf-hint').textContent = crossesMidnight
+    ? `⚠️ O período cruza meia-noite. Início real: ${fromDateStr} ${fromTimeStr} (UTC-3 → ajustado ao enviar).`
+    : `Últimas 4 horas: ${fromDateStr} ${fromTimeStr} → ${toDateStr} ${toTimeStr} (horário local, Brasília).`;
+}
+
+function openPixFallbackModal() {
+  pixFallbackSetDefault();
+  document.getElementById('pix-fallback-modal').classList.add('open');
+}
+
+function closePixFallbackModal() {
+  document.getElementById('pix-fallback-modal').classList.remove('open');
+}
+document.getElementById('pix-fallback-modal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closePixFallbackModal();
+});
+
+async function openFallbackLog() {
+  // Abre o log viewer do Baixas PIX e seleciona automaticamente o fallback_pix.log
+  await openLog('client-baixas-pix');
+  // logFileList já está preenchido após openLog; procura o arquivo de fallback
+  const fbIdx = logFileList.findIndex(f =>
+    f.label && f.label.toLowerCase().includes('fallback_pix')
+  );
+  if (fbIdx > 0) {
+    switchLogFile('client-baixas-pix', fbIdx);
+  } else if (fbIdx === -1) {
+    toast('Log de fallback ainda não existe (execute o fallback ao menos uma vez)', 'err');
+  }
+}
+
+async function runPixFallback() {
+  const dateVal = document.getElementById('pf-date').value;
+  const fromVal = document.getElementById('pf-from').value;
+  const toVal   = document.getElementById('pf-to').value;
+
+  if (!dateVal || !fromVal || !toVal) {
+    toast('Preencha data e horários', 'err');
+    return;
+  }
+
+  // Monta datetimes locais (fuso Brasília = UTC-3) e converte para UTC ISO
+  function toUtcIso(date, time) {
+    // Cria datetime local (sem indicação de fuso) e converte para UTC
+    const local = new Date(`${date}T${time}:00`);
+    return local.toISOString().replace('.000Z', '.000Z');
+  }
+
+  const inicio = toUtcIso(dateVal, fromVal);
+  const fim    = toUtcIso(dateVal, toVal);
+
+  if (new Date(inicio) >= new Date(fim)) {
+    toast('Horário de início deve ser anterior ao fim', 'err');
+    return;
+  }
+
+  const btn = document.getElementById('btn-pf-run');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span> Iniciando...';
+
+  try {
+    const result = await api('POST', '/api/pix-fallback', { inicio, fim });
+    toast(`✅ ${result.msg || 'Fallback iniciado com sucesso'}`);
+    closePixFallbackModal();
+  } catch (e) {
+    toast(`Erro no fallback: ${e.message}`, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '▶ Executar Fallback';
+  }
+}
 
 (function(){
   const handle = document.getElementById('resize-handle');

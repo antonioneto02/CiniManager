@@ -2806,6 +2806,25 @@ app.post('/api/bot/ack', botAuthMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── Fallback manual Baixas PIX ──────────────────────────────────────────────
+app.post('/api/pix-fallback', async (req, res) => {
+  const { inicio, fim } = req.body || {};
+  const payload = {};
+  if (inicio) payload.inicio = String(inicio);
+  if (fim)    payload.fim    = String(fim);
+
+  try {
+    const resp = await axios.post('http://localhost:5001/fallback', payload, { timeout: 12000 });
+    console.log(`[pix-fallback] Iniciado — inicio=${payload.inicio || '4h atrás'} fim=${payload.fim || 'agora'}`);
+    return res.status(resp.status).json(resp.data);
+  } catch (e) {
+    const msg = e.response?.data?.error || e.message || 'Erro ao chamar fallback PIX';
+    const status = e.response?.status || 500;
+    console.error(`[pix-fallback] Erro: ${msg}`);
+    return res.status(status).json({ error: msg });
+  }
+});
+
 app.post('/api/bot/command', botAuthMiddleware, async (req, res) => {
   const raw = String(req.body.text || '').trim();
   if (!raw) return res.status(400).json({ error: 'Comando vazio' });
