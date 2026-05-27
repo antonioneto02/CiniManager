@@ -1523,10 +1523,24 @@ function getUnpushedCommits(cwd) {
 function installDeps(cwd, cwdWin, log) {
   if (fs.existsSync(path.join(cwdWin, 'package.json'))) {
     const hasLockFile = fs.existsSync(path.join(cwdWin, 'package-lock.json'));
-    const cmd = hasLockFile ? 'npm ci --omit=dev' : 'npm install --omit=dev --no-package-lock';
+    if (hasLockFile) {
+      log('deploy', 'npm ci --omit=dev...');
+      try {
+        const out = execSync('npm ci --omit=dev', { cwd, encoding: 'utf8', timeout: 120000 });
+        log('deploy', out.trim() || 'concluído');
+        return;
+      } catch (e) {
+        const msg = (e.stderr || e.message || '').toString();
+        const isLockMismatch = msg.includes('does not satisfy') || msg.includes('Missing:') || msg.includes('Invalid: lock file');
+        if (!isLockMismatch) throw new Error('npm install falhou: ' + e.message.split('\n')[0]);
+        log('deploy', 'lock file desatualizado, usando npm install para atualizar...');
+      }
+    }
+    // --no-package-lock evita tentar reescrever o lock file (pode ser read-only no servidor)
+    const cmd = 'npm install --omit=dev --no-package-lock';
     log('deploy', cmd + '...');
     try {
-      const out = execSync(cmd, { cwd, encoding: 'utf8', timeout: 120000 });
+      const out = execSync(cmd, { cwd, encoding: 'utf8', timeout: 180000 });
       log('deploy', out.trim() || 'concluído');
     } catch (e) { throw new Error('npm install falhou: ' + e.message.split('\n')[0]); }
   }
