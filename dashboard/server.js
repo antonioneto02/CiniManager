@@ -1523,6 +1523,7 @@ function getUnpushedCommits(cwd) {
 function installDeps(cwd, cwdWin, log) {
   if (fs.existsSync(path.join(cwdWin, 'package.json'))) {
     const hasLockFile = fs.existsSync(path.join(cwdWin, 'package-lock.json'));
+    const hasNodeModules = fs.existsSync(path.join(cwdWin, 'node_modules'));
     if (hasLockFile) {
       log('deploy', 'npm ci --omit=dev...');
       try {
@@ -1533,10 +1534,13 @@ function installDeps(cwd, cwdWin, log) {
         const msg = (e.stderr || e.message || '').toString();
         const isLockMismatch = msg.includes('does not satisfy') || msg.includes('Missing:') || msg.includes('Invalid: lock file');
         if (!isLockMismatch) throw new Error('npm install falhou: ' + e.message.split('\n')[0]);
-        log('deploy', 'lock file desatualizado, usando npm install para atualizar...');
+        if (hasNodeModules) {
+          log('deploy', '⚠️  lock file desatualizado mas node_modules presente — pulando reinstalação. Atualize o package-lock.json no repositório.');
+          return;
+        }
+        log('deploy', 'lock file desatualizado e node_modules ausente, usando npm install...');
       }
     }
-    // --no-package-lock evita tentar reescrever o lock file (pode ser read-only no servidor)
     const cmd = 'npm install --omit=dev --no-package-lock';
     log('deploy', cmd + '...');
     try {
