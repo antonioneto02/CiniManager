@@ -1532,7 +1532,9 @@ function installDeps(cwd, cwdWin, log) {
         return;
       } catch (e) {
         const msg = (e.stderr || e.message || '').toString();
-        const isLockMismatch = msg.includes('does not satisfy') || msg.includes('Missing:') || msg.includes('Invalid: lock file');
+        const isLockMismatch = msg.includes('does not satisfy') || msg.includes('Missing:') || msg.includes('Invalid: lock file')
+          || msg.includes('can only install with') || msg.includes('npm-shrinkwrap.json') || /EUSAGE/i.test(msg)
+          || !fs.existsSync(path.join(cwdWin, 'package-lock.json'));
         if (!isLockMismatch) throw new Error('npm install falhou: ' + e.message.split('\n')[0]);
         if (hasNodeModules) {
           log('deploy', '⚠️  lock file desatualizado mas node_modules presente — pulando reinstalação. Atualize o package-lock.json no repositório.');
@@ -1875,6 +1877,7 @@ async function pollGitUpdates() {
   const startedAt = now();
   console.log(`[poll] Verificando atualizações em ${Object.keys(APP_REGISTRY).length} apps...`);
 
+  let consecutiveTimeouts = 0;
   for (const [appName, cwd] of Object.entries(APP_REGISTRY)) {
     if (DEPLOY_EXCLUDE.has(appName)) continue;
     if (deployLock.has(appName)) continue;
@@ -1891,8 +1894,18 @@ async function pollGitUpdates() {
         pollErrorAt[appName] = Date.now();
         console.error(`[poll] ${appName}: ${fetchResult.reason}`);
         await notifyGitPollError(appName, fetchResult.reason);
+        if (fetchResult.reason === 'git fetch timeout') {
+          consecutiveTimeouts++;
+          if (consecutiveTimeouts >= 3) {
+            console.error('[poll] 3+ timeouts consecutivos — provável problema de rede. Abortando ciclo.');
+            break;
+          }
+        } else {
+          consecutiveTimeouts = 0;
+        }
         continue;
       }
+      consecutiveTimeouts = 0;
       delete pollErrors[appName];
       delete pollErrorAt[appName];
 
