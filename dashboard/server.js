@@ -286,6 +286,7 @@ const APP_REGISTRY = {
   'portal-vagas-rh':      'E:/Projetos/PortalVagasRH',
   'portal-api':           'E:/Projetos/portalApi',
   'portal-ete':           'E:/Projetos/portalETE',
+  'app-tracking':         'E:/Projetos/AppTracking',
 };
 
 const DEPLOY_EXCLUDE    = new Set(['log-watcher']);
@@ -316,6 +317,7 @@ const DISPLAY_NAMES = {
   'portal-vagas-rh':    'Portal Vagas RH',
   'portal-api':         'Portal API (Backend)',
   'portal-ete':         'Portal ETE',
+  'app-tracking':       'Cini Tracking',
 };
 
 function appLabel(name) {
@@ -645,7 +647,7 @@ const gitAlertThrottle = new Map();
 const recentNotifications = new Map();
 const NOTIFY_DUP_WINDOW_MS = 5 * 60 * 1000; 
 const APP_ERROR_DUP_WINDOW_MS = 5 * 60 * 1000; 
-const GIT_ALERT_DUP_WINDOW_MS = 5 * 60 * 1000;  
+const GIT_ALERT_DUP_WINDOW_MS = 4 * 60 * 60 * 1000;  // 4h — erros persistentes (auth/rede) não spamam
 const PM2_EVENT_DUP_WINDOW_MS = 5 * 60 * 1000;  
 const ALERT_VISIBLE_MS = 6 * 60 * 60 * 1000;
 const LOG_ERROR_PATTERNS = [
