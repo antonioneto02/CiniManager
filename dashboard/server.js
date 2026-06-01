@@ -286,13 +286,13 @@ const APP_REGISTRY = {
   'portal-vagas-rh':      'E:/Projetos/PortalVagasRH',
   'portal-api':           'E:/Projetos/portalApi',
   'portal-ete':           'E:/Projetos/portalETE',
-  'app-tracking':         'E:/Projetos/AppTracking',
+  'cini-tracking':        'E:/Projetos/AppTracking',
 };
 
 const DEPLOY_EXCLUDE    = new Set(['log-watcher']);
 const STAGED_DEPLOY_APPS = new Set(['cini-dashboard']);
 const NOTIFY_EXCLUDE = new Set(['log-watcher']);
-const HTTPS_APPS = new Set(['whatsapp-webnode', 'webhook-whatsapp', 'whatsapp-motoristas', 'portal-consultas', 'portal-vagas-rh']);
+const HTTPS_APPS = new Set(['whatsapp-webnode', 'webhook-whatsapp', 'whatsapp-motoristas', 'portal-consultas', 'portal-vagas-rh', 'cini-tracking']);
 const AUTOPOLL_FILE = path.join(__dirname, '.autopoll.json');
 const CARD_ORDER_FILE = path.join(__dirname, '.card-order.json');
 const DISPLAY_NAMES = {
@@ -317,7 +317,7 @@ const DISPLAY_NAMES = {
   'portal-vagas-rh':    'Portal Vagas RH',
   'portal-api':         'Portal API (Backend)',
   'portal-ete':         'Portal ETE',
-  'app-tracking':       'Cini Tracking',
+  'cini-tracking':      'APP Tracking',
 };
 
 function appLabel(name) {
@@ -2053,6 +2053,7 @@ const KNOWN_PORTS = {
   'central-notificacoes': 5000,
   'cini-dashboard':       9999,
   'portal-ete':           3021,
+  'cini-tracking':        3010,
 };
 
 function readAppPort(appName) {
