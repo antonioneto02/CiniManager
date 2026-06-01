@@ -778,17 +778,6 @@ async function notifyAppLogError(appName, source, text) {
     source,
     detail: text,
   });
-  const recent = (logBuffers[appName] || []).slice(-6).map(entry => `${entry.source}: ${trimText(entry.text, 180)}`);
-  await notifyWhatsApp(`🔴 Erro da aplicação — ${appLabel(appName)}`, [
-    `📱 App: ${appLabel(appName)}`,
-    `📌 Origem: ${source}`,
-    `⚠️ Linha: ${trimText(text, 260)}`,
-    recent.length ? '' : null,
-    recent.length ? '📄 Últimas linhas:' : null,
-    recent.length ? recent.join('\n') : null,
-    '',
-    `_Responda *visto ${appName}* para marcar como visto_`,
-  ]);
   setBotAdminPending('ask_ack', appName, `Deseja marcar os erros de *${appLabel(appName)}* como vistos?`).catch(() => {});
 }
 
@@ -805,10 +794,6 @@ async function notifyGitPollError(appName, message) {
     source: 'polling',
     detail: message,
   });
-  await notifyWhatsApp(`⛔ Falha Git/Polling — ${appLabel(appName)}`, [
-    `📱 App: ${appLabel(appName)}`,
-    `⚠️ Erro: ${trimText(message, 300)}`,
-  ]);
 }
 
 async function notifyPm2EventError(appName, event) {
@@ -828,10 +813,6 @@ async function notifyPm2EventError(appName, event) {
     source: 'pm2',
     detail: `evento PM2: ${event}`,
   });
-  await notifyWhatsApp(`🔴 Evento crítico PM2 — ${appLabel(appName)}`, [
-    `📱 App: ${appLabel(appName)}`,
-    `⚠️ Evento: ${event}`,
-  ]);
 }
 
 function sortAppsByCardOrder(list) {
@@ -1339,6 +1320,8 @@ const GIT_ENV = {
   ...process.env,
   GIT_TERMINAL_PROMPT: '0',
   GCM_INTERACTIVE: 'never',
+  GIT_HTTP_LOW_SPEED_LIMIT: '1024',
+  GIT_HTTP_LOW_SPEED_TIME: '20',
 };
 
 function git(args, cwd) {
@@ -1361,9 +1344,9 @@ function gitAsync(args, cwd, interactive, timeoutMs) {
   });
 }
 
-function gitFetch(cwd, timeoutMs = 20000) {
+function gitFetch(cwd, timeoutMs = 45000) {
   return new Promise(resolve => {
-    execFile('git', ['fetch', '--quiet'], {
+    execFile('git', ['fetch', '--quiet', '--no-tags'], {
       cwd, encoding: 'utf8',
       timeout: timeoutMs,
       env: GIT_ENV,
@@ -2265,11 +2248,6 @@ app.post('/api/apps/reset-restarts', async (req, res) => {
 
   const failed = results.filter(item => !item.ok);
   if (failed.length) {
-    await notifyWhatsApp('⚠️ Limpeza de restarts com falha parcial', [
-      '📌 Origem: dashboard',
-      `✅ Sucesso: ${results.filter(item => item.ok).map(item => appLabel(item.app)).join(', ') || 'nenhum'}`,
-      `❌ Falha: ${failed.map(item => `${appLabel(item.app)} (${trimText(item.error, 120)})`).join(', ')}`,
-    ]);
     return res.status(500).json({
       error: `Falha ao limpar ${failed.length} aplicação(ões)`,
       results,
@@ -2403,11 +2381,6 @@ app.post('/api/apps/:name/pull', async (req, res) => {
   if (!gitRoot) return res.status(400).json({ error: 'Sem repositório git' });
   const out = git('pull', gitRoot);
   if (out === null) {
-    await notifyWhatsApp(`❌ Git pull falhou — ${appLabel(name)}`, [
-      `📱 App: ${appLabel(name)}`,
-      '📌 Origem: dashboard',
-      '⚠️ Erro: git pull falhou',
-    ]);
     return res.status(500).json({ error: 'git pull falhou' });
   }
   await notifyWhatsApp(`⬇ Git pull executado — ${appLabel(name)}`, [
@@ -2970,27 +2943,9 @@ app.post('/api/webhook/monitor', async (req, res) => {
         for (const o of others.slice(0, 6)) lines.push(`[Outros] ${String(o).slice(0, 220)}`);
       }
 
-      await notifyWhatsApp(title, lines);
       addDeployHistory({ time: now(), app: APP_ALVO, status: 'ok', detail: 'restart automático — Monitor PIX DOWN' });
       console.log(`[webhook/monitor] ${APP_ALVO} reiniciado com sucesso.`);
     } catch (restartErr) {
-      const monitorUrl2 = body?.monitor?.url || body?.monitor?.link || body?.monitorUrl || '';
-      const title2 = '🔴 Application went down';
-      const mainLine2 = String(body?.heartbeat?.msg || body?.msg || errorDetail).slice(0, 300);
-      const lines2 = [
-        `📱 ${monitorName}`,
-        `[${monitorName}] [🔴 Down] ${mainLine2}`,
-      ];
-      if (monitorUrl2) lines2.push(monitorUrl2);
-      lines2.push('', `❌ Restart automático FALHOU — ${appLabel(APP_ALVO)}`, `⚠️ Erro restart: ${restartErr.message}`);
-
-      const others2 = body?.others || body?.events || body?.errors || body?.additional || null;
-      if (Array.isArray(others2) && others2.length) {
-        lines2.push('', 'Outros');
-        for (const o of others2.slice(0, 6)) lines2.push(`[Outros] ${String(o).slice(0, 220)}`);
-      }
-
-      await notifyWhatsApp(title2, lines2);
       addDeployHistory({ time: now(), app: APP_ALVO, status: 'error', detail: `restart automático falhou: ${restartErr.message}` });
       console.error(`[webhook/monitor] Falha no restart de ${APP_ALVO}:`, restartErr.message);
     }

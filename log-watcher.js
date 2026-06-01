@@ -133,10 +133,7 @@ function startLogBus() {
         const name = pkt.process?.name;
         const line = (pkt.data || '').trim();
         if (!name || !line || IGNORE_APPS.has(name)) return;
-        if (!isErrorLine(line)) return;
-        if (shouldSend(`log:${name}:${line}`)) {
-          notify(buildLogMessage(name, line, 'stdout'));
-        }
+        if (isErrorLine(line)) console.error(`[log-watcher] ${name}: ${line.substring(0, 200)}`);
       });
 
       bus.on('process:exception', (pkt) => {
@@ -144,9 +141,7 @@ function startLogBus() {
         if (!name || IGNORE_APPS.has(name)) return;
         const e    = pkt.data || {};
         const line = [e.message, e.stack].filter(Boolean).join('\n');
-        if (shouldSend(`exc:${name}:${line}`)) {
-          notify(buildLogMessage(name, line, 'stderr'));
-        }
+        console.error(`[log-watcher] exception ${name}: ${line.substring(0, 200)}`);
       });
 
       bus.on('process:event', (pkt) => {
@@ -158,31 +153,22 @@ function startLogBus() {
         if (event === 'exit' || event === 'stop' || event === 'error') {
           const restarts = pkt.process?.pm2_env?.restart_time ?? 0;
           const jaEstaDown = processStatus.get(name) === 'down';
-
           if (!jaEstaDown) {
-            const msg = `🚨 *Processo caiu!* — ${name}\n📅 ${ts}\n\n🔧 Evento: ${event}\n🔄 Restarts: ${restarts}\n\n💻 \`pm2 logs ${name} --lines 30\``;
-            console.log(`[log-watcher] Processo caiu (primeira vez): ${name} (${event})`);
-            notify(msg);
+            console.log(`[log-watcher] Processo caiu (primeira vez): ${name} (${event}) restarts=${restarts}`);
             processStatus.set(name, 'down');
           } else {
-            console.log(`[log-watcher] Processo ainda caindo (restart ${restarts}): ${name} — sem nova notificação`);
+            console.log(`[log-watcher] Processo ainda caindo (restart ${restarts}): ${name}`);
           }
         }
 
         if (event === 'online') {
           const wasDown = processStatus.get(name) === 'down';
-          if (wasDown) {
-            const msg = `✅ *Processo recuperado* — ${name}\n📅 ${ts}`;
-            console.log(`[log-watcher] Processo recuperado: ${name}`);
-            notify(msg);
-          }
+          if (wasDown) console.log(`[log-watcher] Processo recuperado: ${name}`);
           processStatus.set(name, 'online');
         }
 
         if (event === 'restart overlimit') {
-          const msg = `🔥 *Loop de crash!* — ${name}\n📅 ${ts}\n\n⚠️ O app caiu várias vezes seguidas e o PM2 parou de reiniciar.\n\n💻 \`pm2 logs ${name} --lines 50\``;
           console.log(`[log-watcher] Restart overlimit: ${name}`);
-          notify(msg);
         }
       });
 
@@ -216,12 +202,7 @@ function checkResources() {
           resourceAlerts.set(name, prev + 1);
 
           if (prev + 1 >= 2) {
-            const dedupKey = `resource:${name}:${problems.join(',')}`;
-            if (shouldSend(dedupKey, 10 * 60 * 1000)) { 
-              const msg = `⚠️ *Recurso alto* — ${name}\n📅 ${ts()}\n\n${problems.join('\n')}`;
-              console.log(`[log-watcher] Recurso alto: ${name} — ${problems.join(', ')}`);
-              notify(msg);
-            }
+            console.log(`[log-watcher] Recurso alto: ${name} — ${problems.join(', ')}`);
           }
         } else {
           resourceAlerts.delete(name);
@@ -260,12 +241,7 @@ function checkDisk() {
     console.log(`[log-watcher] Disco ${drive}: ${info.usedPct}% usado (${info.freeMb} MB livres de ${info.totalGb} GB)`);
 
     if (info.usedPct >= DISK_LIMIT_PCT) {
-      const dedupKey = `disk:${drive}:${info.usedPct}`;
-      if (shouldSend(dedupKey, 60 * 60 * 1000)) { 
-        const msg = `💿 *Disco quase cheio!* — Drive ${drive}\n📅 ${ts()}\n\n📈 Uso: ${info.usedPct}%\n📦 Livre: ${info.freeMb} MB de ${info.totalGb} GB\n\n⚠️ Limpe logs ou arquivos temporários.`;
-        console.log(`[log-watcher] Alerta de disco: ${drive} em ${info.usedPct}%`);
-        notify(msg);
-      }
+      console.warn(`[log-watcher] Alerta de disco: ${drive} em ${info.usedPct}% (${info.freeMb} MB livres)`);
     }
   }
 }
