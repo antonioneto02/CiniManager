@@ -1338,7 +1338,6 @@ async function stagedTest(appName, cwdWin, log) {
 const GIT_ENV = {
   ...process.env,
   GIT_TERMINAL_PROMPT: '0',
-  GIT_ASKPASS: '',
   GCM_INTERACTIVE: 'never',
 };
 
@@ -1410,15 +1409,24 @@ async function fixRemoteUrls() {
       const url = execFileSync('git', ['remote', 'get-url', 'origin'], {
         cwd: gitRoot, encoding: 'utf8', timeout: 5000,
       }).trim();
-      const m = url.match(/^https:\/\/github\.com\/([^\/]+)\//);
+      // Match URLs with or without existing username/token
+      const m = url.match(/^https:\/\/(?:[^@]+@)?github\.com\/([^\/]+)\//);
       if (!m) continue;
       const owner = m[1];
-      const newUrl = url.replace('https://github.com/', `https://${owner}@github.com/`);
+      // PAT lookup: GITHUB_TOKEN_<OWNER_MAIUSCULO> ou GITHUB_TOKEN genérico
+      const token = process.env[`GITHUB_TOKEN_${owner.toUpperCase()}`] || process.env.GITHUB_TOKEN;
+      let newUrl;
+      if (token) {
+        newUrl = url.replace(/^https:\/\/(?:[^@]+@)?github\.com\//, `https://oauth2:${token}@github.com/`);
+      } else {
+        newUrl = url.replace(/^https:\/\/(?:[^@]+@)?github\.com\//, `https://${owner}@github.com/`);
+      }
+      if (newUrl === url) continue;
       execFileSync('git', ['remote', 'set-url', 'origin', newUrl], {
         cwd: gitRoot, encoding: 'utf8', timeout: 5000,
       });
       results.push({ app: appName, owner });
-      console.log(`[auth] ${appName}: remote → ${owner}@github.com`);
+      console.log(`[auth] ${appName}: remote → ${token ? 'PAT' : owner}@github.com`);
     } catch {}
   }
   return results;
@@ -1858,6 +1866,8 @@ let lastPollTime   = null;
 let cachedGitInfo  = {};
 let pollErrors     = {};
 const pollErrorAt  = {};
+const pollErrorLogAt = {};  // throttle console.error: chave → último log
+const POLL_ERROR_LOG_WINDOW_MS = 30 * 60 * 1000; // 30 min
 
 async function refreshGitCache() {
   const info = {};
@@ -1902,7 +1912,12 @@ async function pollGitUpdates() {
       if (!fetchResult.ok) {
         pollErrors[appName] = fetchResult.reason;
         pollErrorAt[appName] = Date.now();
-        console.error(`[poll] ${appName}: ${fetchResult.reason}`);
+        const errLogKey = `${appName}:${fetchResult.reason}`;
+        const lastLoggedAt = pollErrorLogAt[errLogKey] || 0;
+        if (Date.now() - lastLoggedAt >= POLL_ERROR_LOG_WINDOW_MS) {
+          pollErrorLogAt[errLogKey] = Date.now();
+          console.error(`[poll] ${appName}: ${fetchResult.reason}`);
+        }
         await notifyGitPollError(appName, fetchResult.reason);
         if (fetchResult.reason === 'git fetch timeout' && !fetchedRoots.has(gitRoot + '_counted')) {
           fetchedRoots.set(gitRoot + '_counted', true);
@@ -1915,6 +1930,11 @@ async function pollGitUpdates() {
         continue;
       }
       consecutiveTimeouts = 0;
+      if (pollErrors[appName]) {
+        // Se tinha erro antes e agora ok, zera o throttle para logar a recuperação na próxima falha
+        const oldKey = `${appName}:${pollErrors[appName]}`;
+        delete pollErrorLogAt[oldKey];
+      }
       delete pollErrors[appName];
       delete pollErrorAt[appName];
 
