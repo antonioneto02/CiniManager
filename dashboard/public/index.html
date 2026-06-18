@@ -392,6 +392,7 @@ function getAppUrl(app) {
   if (app.name === 'portal-consultas') return `https://${location.hostname}:${app.port}`;
   if (app.name === 'portal-vagas-rh') return `https://consultas.cini.com.br:${app.port}`;
   if (app.name === 'portal-ete') return `http://consultas.cini.com.br:${app.port}`;
+  if (app.name === 'portal-intranet') return `https://${location.hostname}:${app.port}`;
   return `http://${location.hostname}:${app.port}`;
 }
 
@@ -417,6 +418,9 @@ const DISPLAY_NAMES = {
   'portal-vagas-rh': 'Portal Vagas RH',
   'portal-api': 'Portal API (Backend)',
   'cini-tracking': 'APP Tracking',
+  'lp-negocios': 'Landing Cini Bebidas',
+  'cini-leads': 'Painel de Leads',
+  'portal-intranet': 'Intranet Cini',
 };
 function displayName(name) { return DISPLAY_NAMES[name] || name; }
 const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -439,6 +443,7 @@ const SERVICE_LOG_FILTERS = {
   'central-notificacoes':[{l:'Erro',t:'error'},{l:'Email',t:'email'},{l:'WhatsApp',t:'whatsapp'},{l:'Enviado',t:'enviado'},{l:'Falha',t:'falha'},{l:'Fila',t:'fila'}],
   'gerenciador-cargas':  [{l:'Erro',t:'error'},{l:'Upload',t:'upload'},{l:'Carga',t:'carga'},{l:'Processado',t:'process'},{l:'Falha',t:'falha'}],
   'cini-dashboard':      [{l:'Erro',t:'error'},{l:'Deploy',t:'deploy'},{l:'Auth',t:'auth'},{l:'Request',t:'request'}],
+  'portal-intranet':     [{l:'Erro',t:'error'},{l:'Login',t:'login'},{l:'Protheus',t:'protheus'},{l:'Notícia',t:'noticia'},{l:'Documento',t:'documento'},{l:'SQL',t:'sql'}],
 };
 const DEFAULT_LOG_FILTERS = [{l:'Erro',t:'error'},{l:'Warning',t:'warn'},{l:'Request',t:'request'},{l:'Timeout',t:'timeout'}];
 

@@ -287,12 +287,17 @@ const APP_REGISTRY = {
   'portal-api':           'E:/Projetos/portalApi',
   'portal-ete':           'E:/Projetos/portalETE',
   'cini-tracking':        'E:/Projetos/AppTracking',
+  'coleta-sac':           'C:/Projetos/coleta-SAC',
+  'lp-negocios':          'E:/Projetos/LP-Negocios',
+  'cini-leads':           'E:/Projetos/Cini-Leads',
+  'portal-intranet':      'E:/Projetos/PortalIntranetCini',
+  'portal-rnc':           'E:/Projetos/PortalRNC',
 };
 
 const DEPLOY_EXCLUDE    = new Set(['log-watcher']);
 const STAGED_DEPLOY_APPS = new Set(['cini-dashboard']);
 const NOTIFY_EXCLUDE = new Set(['log-watcher']);
-const HTTPS_APPS = new Set(['whatsapp-webnode', 'webhook-whatsapp', 'whatsapp-motoristas', 'portal-consultas', 'portal-vagas-rh', 'cini-tracking']);
+const HTTPS_APPS = new Set(['whatsapp-webnode', 'webhook-whatsapp', 'whatsapp-motoristas', 'portal-consultas', 'portal-vagas-rh', 'cini-tracking', 'coleta-sac', 'portal-intranet', 'portal-rnc']);
 const AUTOPOLL_FILE = path.join(__dirname, '.autopoll.json');
 const CARD_ORDER_FILE = path.join(__dirname, '.card-order.json');
 const DISPLAY_NAMES = {
@@ -318,6 +323,11 @@ const DISPLAY_NAMES = {
   'portal-api':         'Portal API (Backend)',
   'portal-ete':         'Portal ETE',
   'cini-tracking':      'APP Tracking',
+  'coleta-sac':         'Coleta SAC',
+  'lp-negocios':        'Landing Cini Bebidas',
+  'cini-leads':         'Painel de Leads',
+  'portal-intranet':    'Intranet Cini',
+  'portal-rnc':         'Portal RNC',
 };
 
 function appLabel(name) {
@@ -1083,7 +1093,15 @@ function startBus() {
 startBus();
 setInterval(() => {
   try { pushErrorHistory(); } catch (e) { console.error('[poll-errors-db] erro:', e.message); }
-}, 5000);
+}, 30000);
+
+setInterval(() => {
+  const cutoff = Date.now() - 30 * 60 * 1000;
+  for (const [k, v] of logAlertThrottle) if (v < cutoff) logAlertThrottle.delete(k);
+  for (const [k, v] of gitAlertThrottle) if (v < cutoff) gitAlertThrottle.delete(k);
+  for (const [k, v] of recentNotifications) if (v < cutoff) recentNotifications.delete(k);
+  for (const k of Object.keys(pollErrorLogAt)) if (pollErrorLogAt[k] < cutoff) delete pollErrorLogAt[k];
+}, 15 * 60 * 1000);
 
 function pm2Do(action, target) {
   return ensurePm2().then(() => new Promise((resolve, reject) => {
@@ -1324,10 +1342,20 @@ const GIT_ENV = {
   GIT_HTTP_LOW_SPEED_TIME: '20',
 };
 
+// Git fetch só funciona sem interação se GITHUB_TOKEN estiver configurado.
+// Sem o token, erros de autenticação são esperados e não devem gerar alertas.
+const GIT_AUTH_CONFIGURED = !!(
+  process.env.GITHUB_TOKEN ||
+  Object.keys(process.env).some(k => k.startsWith('GITHUB_TOKEN_'))
+);
+if (!GIT_AUTH_CONFIGURED) {
+  console.warn('[git] GITHUB_TOKEN não configurado — polling de updates Git desativado. Adicione GITHUB_TOKEN ao .env para habilitar.');
+}
+
 function git(args, cwd) {
   try {
     const parts = args.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
-    return execFileSync('git', parts, { cwd, encoding: 'utf8', timeout: 15000, stdio: ['ignore','pipe','ignore'], env: GIT_ENV }).trim();
+    return execFileSync('git', parts, { cwd, encoding: 'utf8', timeout: 15000, stdio: ['ignore','pipe','ignore'], env: GIT_ENV, windowsHide: true }).trim();
   } catch { return null; }
 }
 
@@ -1338,6 +1366,7 @@ function gitAsync(args, cwd, interactive, timeoutMs) {
       cwd, encoding: 'utf8',
       timeout: timeoutMs || (interactive ? 120000 : 30000),
       env: interactive ? process.env : GIT_ENV,
+      windowsHide: true,
     }, (err, stdout) => {
       resolve(err ? null : (stdout || '').trim());
     });
@@ -1350,6 +1379,7 @@ function gitFetch(cwd, timeoutMs = 45000) {
       cwd, encoding: 'utf8',
       timeout: timeoutMs,
       env: GIT_ENV,
+      windowsHide: true,
     }, (err, _stdout, stderr) => {
       if (!err) return resolve({ ok: true });
       const msg = (stderr || err.message || '').trim();
@@ -1390,7 +1420,7 @@ async function fixRemoteUrls() {
     seen.add(gitRoot);
     try {
       const url = execFileSync('git', ['remote', 'get-url', 'origin'], {
-        cwd: gitRoot, encoding: 'utf8', timeout: 5000,
+        cwd: gitRoot, encoding: 'utf8', timeout: 5000, windowsHide: true,
       }).trim();
       // Match URLs with or without existing username/token
       const m = url.match(/^https:\/\/(?:[^@]+@)?github\.com\/([^\/]+)\//);
@@ -1406,7 +1436,7 @@ async function fixRemoteUrls() {
       }
       if (newUrl === url) continue;
       execFileSync('git', ['remote', 'set-url', 'origin', newUrl], {
-        cwd: gitRoot, encoding: 'utf8', timeout: 5000,
+        cwd: gitRoot, encoding: 'utf8', timeout: 5000, windowsHide: true,
       });
       results.push({ app: appName, owner });
       console.log(`[auth] ${appName}: remote → ${token ? 'PAT' : owner}@github.com`);
@@ -1521,7 +1551,7 @@ function installDeps(cwd, cwdWin, log) {
     if (hasLockFile) {
       log('deploy', 'npm ci --omit=dev...');
       try {
-        const out = execSync('npm ci --omit=dev', { cwd, encoding: 'utf8', timeout: 120000 });
+        const out = execSync('npm ci --omit=dev', { cwd, encoding: 'utf8', timeout: 120000, windowsHide: true });
         log('deploy', out.trim() || 'concluído');
         return;
       } catch (e) {
@@ -1540,14 +1570,14 @@ function installDeps(cwd, cwdWin, log) {
     const cmd = 'npm install --omit=dev --no-package-lock';
     log('deploy', cmd + '...');
     try {
-      const out = execSync(cmd, { cwd, encoding: 'utf8', timeout: 180000 });
+      const out = execSync(cmd, { cwd, encoding: 'utf8', timeout: 180000, windowsHide: true });
       log('deploy', out.trim() || 'concluído');
     } catch (e) { throw new Error('npm install falhou: ' + e.message.split('\n')[0]); }
   }
   if (fs.existsSync(path.join(cwdWin, 'requirements.txt'))) {
     log('deploy', 'pip install -r requirements.txt...');
     try {
-      const out = execSync('pip install -r requirements.txt --prefer-binary', { cwd, encoding: 'utf8', timeout: 300000 });
+      const out = execSync('pip install -r requirements.txt --prefer-binary', { cwd, encoding: 'utf8', timeout: 300000, windowsHide: true });
       log('deploy', out.trim().split('\n').slice(-3).join('\n') || 'concluído');
     } catch (e) {
       const detail = (e.stderr || e.stdout || e.message || '').toString().split('\n').filter(l => l && !l.startsWith('WARNING')).slice(0, 5).join(' | ');
@@ -1883,6 +1913,9 @@ async function pollGitUpdates() {
 
     const gitRoot = findGitRoot(cwd);
     if (!gitRoot) continue;
+
+    // Sem credencial configurada, pula o fetch — não há como autenticar sem interação
+    if (!GIT_AUTH_CONFIGURED) continue;
 
     try {
       let fetchResult;
