@@ -10,6 +10,7 @@
     "axios": "^1.8.2",
     "cookie-parser": "^1.4.7",
     "dotenv": "^16.4.7",
+    "ejs": "^6.0.1",
     "express": "^4.18.2",
     "express-session": "^1.18.1",
     "mssql": "^12.2.1",

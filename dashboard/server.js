@@ -264,6 +264,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 const APP_REGISTRY = {
+  'contagem-produtos': 'E:/Projetos/ContagemProdutos',
   'api-weduu':       'C:/Projetos/API_Weduu',
   'erp-cini':        'E:/Projetos/Gestao_Portaria/erp_cini',
   'wf-cini':         'E:/Projetos/WF_Cini/wf_cini',
@@ -292,15 +293,18 @@ const APP_REGISTRY = {
   'cini-leads':           'E:/Projetos/Cini-Leads',
   'portal-intranet':      'E:/Projetos/PortalIntranetCini',
   'portal-rnc':           'E:/Projetos/PortalRNC',
+  'portal-acoes':         'E:/Projetos/PortalAcoes',
+  'portal-resultados':    'E:/Projetos/PortalResultados',
 };
 
 const DEPLOY_EXCLUDE    = new Set(['log-watcher']);
 const STAGED_DEPLOY_APPS = new Set(['cini-dashboard']);
 const NOTIFY_EXCLUDE = new Set(['log-watcher']);
-const HTTPS_APPS = new Set(['whatsapp-webnode', 'webhook-whatsapp', 'whatsapp-motoristas', 'portal-consultas', 'portal-vagas-rh', 'cini-tracking', 'coleta-sac', 'portal-intranet', 'portal-rnc']);
+const HTTPS_APPS = new Set(['whatsapp-webnode', 'webhook-whatsapp', 'whatsapp-motoristas', 'portal-consultas', 'portal-vagas-rh', 'cini-tracking', 'coleta-sac', 'portal-intranet', 'portal-rnc', 'portal-acoes', 'portal-resultados']);
 const AUTOPOLL_FILE = path.join(__dirname, '.autopoll.json');
 const CARD_ORDER_FILE = path.join(__dirname, '.card-order.json');
 const DISPLAY_NAMES = {
+  'contagem-produtos': 'Contagem de Produtos',
   'erp-cini': 'Gestão Portaria',
   'cini-dashboard': 'Cini Manager',
   'client-baixas-pix': 'Baixas PIX',
@@ -328,6 +332,8 @@ const DISPLAY_NAMES = {
   'cini-leads':         'Painel de Leads',
   'portal-intranet':    'Intranet Cini',
   'portal-rnc':         'Portal RNC',
+  'portal-acoes':       'Portal de Ações',
+  'portal-resultados':  'Portal de Resultados',
 };
 
 function appLabel(name) {
@@ -2070,6 +2076,7 @@ const KNOWN_PORTS = {
   'cini-dashboard':       9999,
   'portal-ete':           3021,
   'cini-tracking':        3010,
+  'portal-resultados':    3019,
 };
 
 function readAppPort(appName) {

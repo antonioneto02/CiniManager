@@ -340,5 +340,18 @@ module.exports = {
       merge_logs: true,
       env: { NODE_ENV: 'production', PORT: 3026 },
     },
+    {
+      name: 'portal-acoes',
+      script: 'app.js',
+      cwd: 'E:/Projetos/PortalAcoes',
+      exec_mode: 'fork',
+      autorestart: true,
+      watch: false,
+      windowsHide: true,
+      out_file: 'E:/Projetos/PortalAcoes/logs/portal-acoes.log',
+      error_file: 'E:/Projetos/PortalAcoes/logs/portal-acoes.log',
+      merge_logs: true,
+      env: { NODE_ENV: 'production', PORT: 3027 },
+    },
   ],
 };
