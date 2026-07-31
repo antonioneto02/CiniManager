@@ -13,7 +13,7 @@ const sql           = require('mssql');
 const app  = express();
 const PORT = parseInt(process.env.DASHBOARD_PORT) || 9999;
 
-const PROTHEUS_SERVER = process.env.PROTHEUS_SERVER || 'protheus.cini.com.br';
+const PROTHEUS_AUTH_URL = process.env.PROTHEUS_AUTH_URL || 'http://localhost:3032';
 const SESSION_SECRET = process.env.SESSION_SECRET || 'cini_manager_secret_2026';
 const ALLOWED_USER_BY_ID = {
   '000460': 'antonio.neto',
@@ -59,7 +59,7 @@ function clearAuthCookies(res) {
 
 async function fetchUserFromToken(accessToken) {
   const userIdResp = await axios.get(
-    `http://${PROTHEUS_SERVER}:9001/rest/users/getuserid`,
+    `${PROTHEUS_AUTH_URL}/rest/users/getuserid`,
     { headers: { Authorization: `Bearer ${accessToken}` } }
   );
   const userID = normalizeUserId(userIdResp?.data?.userID);
@@ -68,7 +68,7 @@ async function fetchUserFromToken(accessToken) {
   let profile = {};
   try {
     const userResp = await axios.get(
-      `http://${PROTHEUS_SERVER}:9001/rest/users/${userID}`,
+      `${PROTHEUS_AUTH_URL}/rest/users/${userID}`,
       { headers: { Authorization: `Bearer ${accessToken}` } }
     );
     profile = userResp?.data || {};
@@ -80,7 +80,7 @@ async function fetchUserFromToken(accessToken) {
 
 async function refreshToken(refreshToken, res) {
   const response = await axios.post(
-    `http://${PROTHEUS_SERVER}:9001/rest/api/oauth2/v1/token`,
+    `${PROTHEUS_AUTH_URL}/rest/api/oauth2/v1/token`,
     null,
     {
       params: {
@@ -185,7 +185,7 @@ app.post('/login', async (req, res) => {
 
   try {
     const tokenResp = await axios.post(
-      `http://${PROTHEUS_SERVER}:9001/rest/api/oauth2/v1/token`,
+      `${PROTHEUS_AUTH_URL}/rest/api/oauth2/v1/token`,
       null,
       {
         params: {
@@ -282,6 +282,7 @@ const APP_REGISTRY = {
   'portal-streamlit':     'C:/Projetos/PortalConsultasStreamlit',
   'gerenciador-cargas':   'C:/Projetos/gerenciador-cargas',
   'whatsapp-motoristas':  'E:/Projetos/Central-Notificacoes/WhatsAppMotoristas',
+  'whatsapp-pix-motoristas': 'E:/Projetos/Central-Notificacoes/WhatsAppPixMotoristas',
   'whatsapp-webnode':     'E:/Projetos/Central-Notificacoes/WhatsAppWebNode',
   'central-notificacoes': 'E:/Projetos/Central-Notificacoes/CentralNotificacoes',
   'portal-vagas-rh':      'E:/Projetos/PortalVagasRH',
@@ -295,12 +296,16 @@ const APP_REGISTRY = {
   'portal-rnc':           'E:/Projetos/PortalRNC',
   'portal-acoes':         'E:/Projetos/PortalAcoes',
   'portal-resultados':    'E:/Projetos/PortalResultados',
+  'kanban-entregas':      'E:/Projetos/KanbanEntregas',
+  'gestao-importacao-pedidos': 'E:/Projetos/GestaoImportacaoPedidos',
+  'portal-televendas':    'E:/Projetos/PortalTelevendas',
+  'protheus-auth':        'E:/Projetos/ProtheusAuth',
 };
 
 const DEPLOY_EXCLUDE    = new Set(['log-watcher']);
 const STAGED_DEPLOY_APPS = new Set(['cini-dashboard']);
 const NOTIFY_EXCLUDE = new Set(['log-watcher']);
-const HTTPS_APPS = new Set(['whatsapp-webnode', 'webhook-whatsapp', 'whatsapp-motoristas', 'portal-consultas', 'portal-vagas-rh', 'cini-tracking', 'coleta-sac', 'portal-intranet', 'portal-rnc', 'portal-acoes', 'portal-resultados']);
+const HTTPS_APPS = new Set(['whatsapp-webnode', 'webhook-whatsapp', 'whatsapp-motoristas', 'whatsapp-pix-motoristas', 'portal-consultas', 'portal-vagas-rh', 'cini-tracking', 'coleta-sac', 'portal-intranet', 'portal-rnc', 'portal-acoes', 'portal-resultados']);
 const AUTOPOLL_FILE = path.join(__dirname, '.autopoll.json');
 const CARD_ORDER_FILE = path.join(__dirname, '.card-order.json');
 const DISPLAY_NAMES = {
@@ -321,6 +326,7 @@ const DISPLAY_NAMES = {
   'portal-streamlit': 'Portal Streamlit',
   'gerenciador-cargas': 'Portal de Cargas',
   'whatsapp-motoristas': 'Tracking',
+  'whatsapp-pix-motoristas': 'Whatsapp Pix Chapa',
   'whatsapp-webnode': 'Cini Notifica BOT',
   'webhook-whatsapp': 'Cini Notifica e WB Sicredi',
   'portal-vagas-rh':    'Portal Vagas RH',
@@ -334,6 +340,10 @@ const DISPLAY_NAMES = {
   'portal-rnc':         'Portal RNC',
   'portal-acoes':       'Portal de Ações',
   'portal-resultados':  'Portal de Resultados',
+  'kanban-entregas':    'Kanban Controle de Entregas',
+  'gestao-importacao-pedidos': 'Gestão de Importação de Pedidos',
+  'portal-televendas':  'Portal Televendas',
+  'protheus-auth':      'Protheus Auth',
 };
 
 function appLabel(name) {
@@ -664,8 +674,16 @@ const recentNotifications = new Map();
 const NOTIFY_DUP_WINDOW_MS = 5 * 60 * 1000; 
 const APP_ERROR_DUP_WINDOW_MS = 5 * 60 * 1000; 
 const GIT_ALERT_DUP_WINDOW_MS = 4 * 60 * 60 * 1000;  // 4h — erros persistentes (auth/rede) não spamam
-const PM2_EVENT_DUP_WINDOW_MS = 5 * 60 * 1000;  
+const PM2_EVENT_DUP_WINDOW_MS = 5 * 60 * 1000;
 const ALERT_VISIBLE_MS = 6 * 60 * 60 * 1000;
+
+const whatsappStuckRestartThrottle = new Map();
+const WHATSAPP_STUCK_COOLDOWN_MS = 15 * 60 * 1000;
+const WHATSAPP_STUCK_AGE_MINUTES = 3;
+const WHATSAPP_STUCK_COUNT_THRESHOLD = 3;
+const WHATSAPP_STUCK_MAX_AUTO_RESTARTS = 2;
+const WHATSAPP_STUCK_BREAKER_WINDOW_MS = 60 * 60 * 1000;
+let whatsappStuckRestartTimestamps = [];
 const LOG_ERROR_PATTERNS = [
   /(^|\b)(error|exception|fatal|traceback|unhandled|failed|failure|critical|panic)(\b|:)/i,
   /ECONN|EADDR|ENOENT|ETIMEDOUT|REFUSED|timeout/i,
@@ -1879,7 +1897,79 @@ async function sendSummary() {
   }
 }
 setInterval(sendSummary, 30 * 60 * 1000);
-setTimeout(sendSummary, 90 * 1000); 
+setTimeout(sendSummary, 90 * 1000);
+
+async function checkWhatsappStuckQueue() {
+  // Só considera STATUS='AGUARDANDO_ACK': é a única fila que o próprio bot.js
+  // drena (varredura a cada 60s em processarAguardandoAckFila). STATUS='PENDENTE'
+  // não é tocado pelo bot.js — existem dezenas de linhas PENDENTE órfãs, com meses
+  // de idade e tentativas já esgotadas por outro processo, então usá-las aqui geraria
+  // falso positivo constante e reiniciaria o bot sem necessidade.
+  const APP_ALVO = 'whatsapp-bot';
+  try {
+    const pool = await getPool();
+    const result = await pool.request()
+      .input('ageMin', sql.Int, WHATSAPP_STUCK_AGE_MINUTES)
+      .query(`
+        SELECT COUNT(*) AS aguardandoTravadas
+        FROM dbo.FATO_FILA_NOTIFICACOES
+        WHERE STATUS = 'AGUARDANDO_ACK' AND DTENVIO < DATEADD(MINUTE, -@ageMin, GETDATE())
+      `);
+
+    const row = result.recordset[0] || {};
+    const totalTravadas = row.aguardandoTravadas || 0;
+
+    if (totalTravadas < WHATSAPP_STUCK_COUNT_THRESHOLD) return;
+
+    const info = await pm2Info(APP_ALVO);
+    if (!info || info.status !== 'online') return; // já parado/crashado: autorestart do PM2 cuida disso
+
+    const lastRestart = whatsappStuckRestartThrottle.get(APP_ALVO) || 0;
+    if (Date.now() - lastRestart < WHATSAPP_STUCK_COOLDOWN_MS) {
+      console.log(`[whatsapp-stuck] ${totalTravadas} mensagem(ns) travada(s) — restart suprimido (cooldown ativo)`);
+      return;
+    }
+
+    const breakerCutoff = Date.now() - WHATSAPP_STUCK_BREAKER_WINDOW_MS;
+    whatsappStuckRestartTimestamps = whatsappStuckRestartTimestamps.filter(t => t > breakerCutoff);
+    if (whatsappStuckRestartTimestamps.length >= WHATSAPP_STUCK_MAX_AUTO_RESTARTS) {
+      console.warn(`[whatsapp-stuck] Limite de restarts automáticos atingido na última hora — apenas alertando.`);
+      await notifyWhatsApp('🔴 BOT WhatsApp com fila travada', [
+        `${totalTravadas} mensagem(ns) travada(s) há mais de ${WHATSAPP_STUCK_AGE_MINUTES} min.`,
+        `Restart automático já foi tentado ${whatsappStuckRestartTimestamps.length}x na última hora — intervenção manual necessária.`,
+      ]);
+      return;
+    }
+
+    whatsappStuckRestartThrottle.set(APP_ALVO, Date.now());
+    whatsappStuckRestartTimestamps.push(Date.now());
+    console.log(`[whatsapp-stuck] ${totalTravadas} mensagem(ns) em AGUARDANDO_ACK sem progresso — reiniciando ${APP_ALVO}...`);
+
+    addErrorHistory({
+      time: now(),
+      app: APP_ALVO,
+      type: 'auto-restart',
+      source: 'stuck-queue',
+      detail: `Fila travada — ${totalTravadas} mensagem(ns) em AGUARDANDO_ACK sem progresso há mais de ${WHATSAPP_STUCK_AGE_MINUTES} min. Restart automático disparado.`,
+    });
+
+    try {
+      await pm2Do('restart', APP_ALVO);
+      const infoAfter = await pm2Info(APP_ALVO);
+      await notifyWhatsApp(`🔄 Restart automático — ${appLabel(APP_ALVO)}`, [
+        `${totalTravadas} mensagem(ns) travada(s) há mais de ${WHATSAPP_STUCK_AGE_MINUTES} min.`,
+        `📊 Status: ${infoAfter?.status || '?'} | PID ${infoAfter?.pid || '?'}`,
+      ]);
+    } catch (err) {
+      console.error(`[whatsapp-stuck] Falha ao reiniciar ${APP_ALVO}:`, err.message);
+    }
+  } catch (e) {
+    console.error('[whatsapp-stuck] Erro na verificação:', e.message);
+  }
+}
+setInterval(checkWhatsappStuckQueue, 3 * 60 * 1000);
+setTimeout(checkWhatsappStuckQueue, 60 * 1000);
+
 let pollingRunning = false;
 let lastPollTime   = null;
 let cachedGitInfo  = {};
@@ -2068,15 +2158,16 @@ setTimeout(async () => {
 }, 15000);
 
 const KNOWN_PORTS = {
-  'client-baixas-pix':    5001,
-  'portal-consultas':     3000,
-  'portal-streamlit':     8501,
-  'gerenciador-cargas':   8502,
-  'central-notificacoes': 5000,
-  'cini-dashboard':       9999,
-  'portal-ete':           3021,
-  'cini-tracking':        3010,
-  'portal-resultados':    3019,
+  'client-baixas-pix':       5001,
+  'portal-consultas':        3000,
+  'portal-streamlit':        8501,
+  'gerenciador-cargas':      8502,
+  'central-notificacoes':    5000,
+  'cini-dashboard':          9999,
+  'portal-ete':              3021,
+  'cini-tracking':           3010,
+  'portal-resultados':       3019,
+  'whatsapp-pix-motoristas': 3006,
 };
 
 function readAppPort(appName) {
