@@ -392,5 +392,18 @@ module.exports = {
       merge_logs: true,
       env: { NODE_ENV: 'production', PORT: 3031 },
     },
+    {
+      name: 'solicitacao-fachada',
+      script: 'app.js',
+      cwd: 'E:/Projetos/SolicitacaoFachada',
+      exec_mode: 'fork',
+      autorestart: true,
+      watch: false,
+      windowsHide: true,
+      out_file: 'E:/Projetos/SolicitacaoFachada/logs/solicitacao-fachada.log',
+      error_file: 'E:/Projetos/SolicitacaoFachada/logs/solicitacao-fachada.log',
+      merge_logs: true,
+      env: { NODE_ENV: 'production', PORT: 3035 },
+    },
   ],
 };

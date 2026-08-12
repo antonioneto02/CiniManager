@@ -300,12 +300,15 @@ const APP_REGISTRY = {
   'gestao-importacao-pedidos': 'E:/Projetos/GestaoImportacaoPedidos',
   'portal-televendas':    'E:/Projetos/PortalTelevendas',
   'protheus-auth':        'E:/Projetos/ProtheusAuth',
+  'cini-bom-gourmet':     'E:/Projetos/CiniBomGourmet',
+  'contagem-armazens':    'E:/Projetos/ContagemArmazens',
+  'solicitacao-fachada':  'E:/Projetos/SolicitacaoFachada',
 };
 
 const DEPLOY_EXCLUDE    = new Set(['log-watcher']);
 const STAGED_DEPLOY_APPS = new Set(['cini-dashboard']);
 const NOTIFY_EXCLUDE = new Set(['log-watcher']);
-const HTTPS_APPS = new Set(['whatsapp-webnode', 'webhook-whatsapp', 'whatsapp-motoristas', 'whatsapp-pix-motoristas', 'portal-consultas', 'portal-vagas-rh', 'cini-tracking', 'coleta-sac', 'portal-intranet', 'portal-rnc', 'portal-acoes', 'portal-resultados']);
+const HTTPS_APPS = new Set(['whatsapp-webnode', 'webhook-whatsapp', 'whatsapp-motoristas', 'whatsapp-pix-motoristas', 'portal-consultas', 'portal-vagas-rh', 'cini-tracking', 'coleta-sac', 'portal-intranet', 'portal-rnc', 'portal-acoes', 'portal-resultados', 'contagem-armazens', 'solicitacao-fachada']);
 const AUTOPOLL_FILE = path.join(__dirname, '.autopoll.json');
 const CARD_ORDER_FILE = path.join(__dirname, '.card-order.json');
 const DISPLAY_NAMES = {
@@ -344,6 +347,9 @@ const DISPLAY_NAMES = {
   'gestao-importacao-pedidos': 'Gestão de Importação de Pedidos',
   'portal-televendas':  'Portal Televendas',
   'protheus-auth':      'Protheus Auth',
+  'cini-bom-gourmet':   'Bom Gourmet',
+  'contagem-armazens':  'Contagem de Armazéns',
+  'solicitacao-fachada': 'Solicitação de Fachada',
 };
 
 function appLabel(name) {

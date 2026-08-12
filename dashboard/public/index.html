@@ -393,6 +393,7 @@ function getAppUrl(app) {
   if (app.name === 'portal-vagas-rh') return `https://consultas.cini.com.br:${app.port}`;
   if (app.name === 'portal-ete') return `http://consultas.cini.com.br:${app.port}`;
   if (app.name === 'portal-intranet') return `https://${location.hostname}:${app.port}`;
+  if (app.name === 'solicitacao-fachada') return `https://${location.hostname}:${app.port}`;
   return `http://${location.hostname}:${app.port}`;
 }
 
@@ -424,6 +425,7 @@ const DISPLAY_NAMES = {
   'kanban-entregas': 'Kanban Controle de Entregas',
   'gestao-importacao-pedidos': 'Gestão de Importação de Pedidos',
   'portal-televendas': 'Portal Televendas',
+  'solicitacao-fachada': 'Solicitação de Fachada',
 };
 function displayName(name) { return DISPLAY_NAMES[name] || name; }
 const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
