@@ -4,6 +4,7 @@ const express       = require('express');
 const pm2           = require('pm2');
 const path          = require('path');
 const fs            = require('fs');
+const https         = require('https');
 const axios         = require('axios');
 const session       = require('express-session');
 const cookieParser  = require('cookie-parser');
@@ -13,7 +14,12 @@ const sql           = require('mssql');
 const app  = express();
 const PORT = parseInt(process.env.DASHBOARD_PORT) || 9999;
 
-const PROTHEUS_AUTH_URL = process.env.PROTHEUS_AUTH_URL || 'http://localhost:3032';
+const PROTHEUS_AUTH_URL = process.env.PROTHEUS_AUTH_URL || 'https://consultas.cini.com.br:3032';
+const CERT_DIR = 'C:\\Projetos\\Certificados';
+const sslOptions = {
+  key: fs.readFileSync(path.join(CERT_DIR, 'cini.key')),
+  cert: fs.readFileSync(path.join(CERT_DIR, 'cini.crt')),
+};
 const SESSION_SECRET = process.env.SESSION_SECRET || 'cini_manager_secret_2026';
 const ALLOWED_USER_BY_ID = {
   '000460': 'antonio.neto',
@@ -387,7 +393,7 @@ let cardOrder = loadCardOrder();
 
 const WPP_DEST       = '554188529918';
 const CINI_BOT_TOKEN = process.env.CINI_BOT_TOKEN || '';
-const BOT_API_URL    = process.env.BOT_API_URL    || 'http://localhost:3001';
+const BOT_API_URL    = process.env.BOT_API_URL    || 'https://consultas.cini.com.br:3001';
 const DB_CFG   = {
   server:   'localhost',
   database: 'dw',
@@ -3272,8 +3278,8 @@ app.post('/api/webhook/monitor', async (req, res) => {
 });
 
 loadHistoriesFromDB().then(() => {
-  app.listen(PORT, () => console.log(`[dashboard] Rodando em http://localhost:${PORT}`));
+  https.createServer(sslOptions, app).listen(PORT, () => console.log(`[dashboard] Rodando em https://localhost:${PORT}`));
 }).catch(e => {
   console.error('[dashboard] ERRO ao carregar históricos do banco:', e?.message || e);
-  app.listen(PORT, () => console.log(`[dashboard] Rodando em http://localhost:${PORT} (sem histórico do banco)`));
+  https.createServer(sslOptions, app).listen(PORT, () => console.log(`[dashboard] Rodando em https://localhost:${PORT} (sem histórico do banco)`));
 });
