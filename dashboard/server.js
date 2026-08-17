@@ -1217,6 +1217,111 @@ async function pm2Do(action, target) {
   return pm2DoRaw(action, target);
 }
 
+// ── Limpeza automática de logs antigos (roda dentro do próprio processo do
+// dashboard, não como app pm2 separado, para não brigar com o fs.watch que
+// esse mesmo processo mantém nos arquivos de log de cada app) ─────────────
+const LOG_CLEANUP_MAX_AGE_DIAS = 30;
+const LOG_FILE_RE = /\.log(\.\d+)?(\.gz)?$/i;
+
+function coletarArquivosDeLog(dir) {
+  const achados = [];
+  const logsDir = path.join(dir, 'logs');
+  const pilha = [];
+  if (fs.existsSync(logsDir)) pilha.push(logsDir);
+
+  while (pilha.length) {
+    const atual = pilha.pop();
+    let entradas;
+    try {
+      entradas = fs.readdirSync(atual, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const ent of entradas) {
+      const full = path.join(atual, ent.name);
+      if (ent.isDirectory()) pilha.push(full);
+      else if (LOG_FILE_RE.test(ent.name)) achados.push(full);
+    }
+  }
+
+  try {
+    for (const nome of fs.readdirSync(dir)) {
+      if (LOG_FILE_RE.test(nome)) {
+        const full = path.join(dir, nome);
+        try { if (fs.statSync(full).isFile()) achados.push(full); } catch {}
+      }
+    }
+  } catch {}
+
+  return achados;
+}
+
+// Arquivos que já falharam por permissão (ACL restrita, dono Administrators/SYSTEM
+// e o usuário do dashboard sem direito de exclusão) — sem elevar privilégios não tem
+// como remover, então avisamos uma vez só por processo em vez de repetir todo dia.
+const logCleanupSemPermissao = new Set();
+
+function limparLogsAntigosDoApp(nome, dir) {
+  if (!fs.existsSync(dir)) return { apagados: 0, bytes: 0, semPermissao: 0 };
+  const cutoffMs = Date.now() - LOG_CLEANUP_MAX_AGE_DIAS * 24 * 60 * 60 * 1000;
+  let apagados = 0;
+  let bytes = 0;
+  let semPermissao = 0;
+
+  for (const arq of coletarArquivosDeLog(dir)) {
+    let st;
+    try { st = fs.statSync(arq); } catch { continue; }
+    if (st.mtimeMs >= cutoffMs) continue;
+    try {
+      fs.unlinkSync(arq);
+      apagados++;
+      bytes += st.size;
+      logCleanupSemPermissao.delete(arq);
+    } catch (e) {
+      const semAcesso = e.code === 'EPERM' || e.code === 'EACCES';
+      if (semAcesso) {
+        semPermissao++;
+        if (!logCleanupSemPermissao.has(arq)) {
+          logCleanupSemPermissao.add(arq);
+          console.warn(`[log-cleanup] Sem permissão para apagar ${arq} (ACL do arquivo não permite exclusão pelo usuário do dashboard) — pulando.`);
+        }
+      } else {
+        console.warn(`[log-cleanup] Falha ao apagar ${arq}: ${e.message}`);
+      }
+    }
+  }
+  return { apagados, bytes, semPermissao };
+}
+
+function rodarLimpezaDeLogsAntigos() {
+  const inicio = Date.now();
+  let totalApagados = 0;
+  let totalBytes = 0;
+  let totalSemPermissao = 0;
+
+  for (const [nome, dir] of Object.entries(APP_REGISTRY)) {
+    const { apagados, bytes, semPermissao } = limparLogsAntigosDoApp(nome, dir);
+    if (apagados > 0) {
+      console.log(`[log-cleanup] ${nome}: ${apagados} arquivo(s) removido(s), ${(bytes / 1024 / 1024).toFixed(1)} MB`);
+    }
+    totalApagados += apagados;
+    totalBytes += bytes;
+    totalSemPermissao += semPermissao;
+  }
+
+  if (totalApagados > 0 || totalSemPermissao > 0) {
+    console.log(
+      `[log-cleanup] Concluído em ${((Date.now() - inicio) / 1000).toFixed(1)}s | ` +
+      `${totalApagados} arquivo(s) removido(s) (${(totalBytes / 1024 / 1024).toFixed(1)} MB)` +
+      (totalSemPermissao > 0 ? ` | ${totalSemPermissao} arquivo(s) ignorado(s) por falta de permissão (precisa de um administrador rodar icacls uma vez)` : '')
+    );
+  }
+}
+
+// Primeira varredura pouco depois do boot do dashboard, depois 1x por dia.
+setTimeout(() => { try { rodarLimpezaDeLogsAntigos(); } catch (e) { console.error('[log-cleanup] erro:', e.message); } }, 60_000);
+setInterval(() => { try { rodarLimpezaDeLogsAntigos(); } catch (e) { console.error('[log-cleanup] erro:', e.message); } }, 24 * 60 * 60 * 1000);
+
 async function pm2Reload(appName, log, retries = 5, delayMs = 2000) {
   for (let i = 0; i < retries; i++) {
     try {
