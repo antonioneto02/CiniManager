@@ -300,7 +300,7 @@ const APP_REGISTRY = {
   'gestao-importacao-pedidos': 'E:/Projetos/GestaoImportacaoPedidos',
   'portal-televendas':    'E:/Projetos/PortalTelevendas',
   'protheus-auth':        'E:/Projetos/ProtheusAuth',
-  'cini-bom-gourmet':     'E:/Projetos/CiniBomGourmet',
+  'portal-marketing':     'E:/Projetos/PortalMarketing',
   'contagem-armazens':    'E:/Projetos/ContagemArmazens',
   'solicitacao-fachada':  'E:/Projetos/SolicitacaoFachada',
 };
@@ -347,7 +347,7 @@ const DISPLAY_NAMES = {
   'gestao-importacao-pedidos': 'Gestão de Importação de Pedidos',
   'portal-televendas':  'Portal Televendas',
   'protheus-auth':      'Protheus Auth',
-  'cini-bom-gourmet':   'Bom Gourmet',
+  'portal-marketing':   'Portal do Marketing',
   'contagem-armazens':  'Contagem de Armazéns',
   'solicitacao-fachada': 'Solicitação de Fachada',
 };
