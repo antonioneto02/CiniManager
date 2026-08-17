@@ -1133,13 +1133,88 @@ setInterval(() => {
   for (const k of Object.keys(pollErrorLogAt)) if (pollErrorLogAt[k] < cutoff) delete pollErrorLogAt[k];
 }, 15 * 60 * 1000);
 
-function pm2Do(action, target) {
+// Descobre o PID que está ouvindo (LISTENING) em uma porta TCP, via netstat.
+function pidNaPorta(port) {
+  return new Promise((resolve) => {
+    if (!port) return resolve(null);
+    execFile('netstat', ['-ano'], { windowsHide: true }, (err, stdout) => {
+      if (err || !stdout) return resolve(null);
+      const linha = stdout.split('\n').find((l) => {
+        const t = l.trim();
+        return t.includes(`:${port} `) && /LISTENING/i.test(t);
+      });
+      if (!linha) return resolve(null);
+      const partes = linha.trim().split(/\s+/);
+      const pid = parseInt(partes[partes.length - 1], 10);
+      resolve(Number.isFinite(pid) && pid > 0 ? pid : null);
+    });
+  });
+}
+
+function matarPid(pid) {
+  return new Promise((resolve) => {
+    execFile('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true }, () => resolve());
+  });
+}
+
+async function aguardarPortaLivre(port, tentativas, intervaloMs) {
+  for (let i = 0; i < tentativas; i++) {
+    const pid = await pidNaPorta(port);
+    if (!pid) return true;
+    await new Promise((r) => setTimeout(r, intervaloMs));
+  }
+  return false;
+}
+
+// Confere se a porta configurada para o app já está livre; se um processo zumbi
+// (que o pm2 não está mais controlando, sobrevivente de um stop/restart anterior)
+// ainda estiver ouvindo nela, mata esse processo antes de deixar o app subir de novo.
+// Isso evita o clássico EADDRINUSE em loop de restart quando o processo antigo não
+// libera a porta a tempo do pm2 subir o novo.
+async function garantirPortaLivre(name) {
+  let porta;
+  try {
+    const lista = await pm2List();
+    const proc = lista.find((p) => p.name === name);
+    const env = proc?.pm2_env?.env || {};
+    porta = Number(env.PORT || env.port) || null;
+  } catch {
+    porta = null;
+  }
+  if (!porta) return; // app sem porta HTTP conhecida (ex: bots) — nada a garantir
+
+  const livre = await aguardarPortaLivre(porta, 6, 500);
+  if (livre) return;
+
+  const pid = await pidNaPorta(porta);
+  if (pid) {
+    console.warn(`[pm2Do] Porta ${porta} de "${name}" ainda ocupada pelo PID ${pid} — encerrando processo zumbi antes de continuar.`);
+    await matarPid(pid);
+    await aguardarPortaLivre(porta, 4, 300);
+  }
+}
+
+function pm2DoRaw(action, target) {
   return ensurePm2().then(() => new Promise((resolve, reject) => {
     pm2[action](target, (err) => {
       if (err) return reject(err);
       resolve();
     });
   }));
+}
+
+async function pm2Do(action, target) {
+  if (action === 'stop' || action === 'restart') {
+    await pm2DoRaw('stop', target);
+    await garantirPortaLivre(target);
+    if (action === 'stop') return;
+  }
+  if (action === 'start' || action === 'restart') {
+    await garantirPortaLivre(target);
+    await pm2DoRaw('start', target);
+    return;
+  }
+  return pm2DoRaw(action, target);
 }
 
 async function pm2Reload(appName, log, retries = 5, delayMs = 2000) {
