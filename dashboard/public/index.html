@@ -380,21 +380,27 @@ const DOCS_APPS = new Set([
   'whatsapp-webnode','portal-consultas','central-notificacoes',
   'client-baixas-pix','gerenciador-cargas'
 ]);
+const HTTPS_APPS = new Set([
+  'whatsapp-webnode', 'webhook-whatsapp', 'whatsapp-motoristas', 'whatsapp-pix-motoristas',
+  'portal-consultas', 'portal-vagas-rh', 'cini-tracking', 'coleta-sac', 'portal-intranet',
+  'portal-rnc', 'portal-acoes', 'portal-resultados', 'contagem-armazens', 'solicitacao-fachada',
+  'contagem-produtos', 'erp-cini', 'wf-cini', 'central-tarefas', 'hub-cini', 'cini-pricing',
+  'notificador-pix', 'whatsapp-bot', 'portal-api', 'portal-ete', 'cini-leads', 'kanban-entregas',
+  'gestao-importacao-pedidos', 'portal-televendas', 'protheus-auth', 'portal-marketing', 'cini-dashboard'
+]);
 
 function getDocsUrl(app) {
   if (!DOCS_APPS.has(app.name) || !app.port) return null;
-  return `http://${location.hostname}:${app.port}/docs`;
+  const proto = HTTPS_APPS.has(app.name) ? 'https' : 'http';
+  return `${proto}://${location.hostname}:${app.port}/docs`;
 }
 
 function getAppUrl(app) {
   if (!app.port) return null;
   if (app.name === 'cini-dashboard') return '/';
-  if (app.name === 'portal-consultas') return `https://${location.hostname}:${app.port}`;
-  if (app.name === 'portal-vagas-rh') return `https://consultas.cini.com.br:${app.port}`;
-  if (app.name === 'portal-ete') return `http://consultas.cini.com.br:${app.port}`;
-  if (app.name === 'portal-intranet') return `https://${location.hostname}:${app.port}`;
-  if (app.name === 'solicitacao-fachada') return `https://${location.hostname}:${app.port}`;
-  return `http://${location.hostname}:${app.port}`;
+  const proto = HTTPS_APPS.has(app.name) ? 'https' : 'http';
+  if (app.name === 'portal-vagas-rh') return `${proto}://consultas.cini.com.br:${app.port}`;
+  return `${proto}://${location.hostname}:${app.port}`;
 }
 
 const DISPLAY_NAMES = {
