@@ -314,7 +314,7 @@ const APP_REGISTRY = {
 const DEPLOY_EXCLUDE    = new Set(['log-watcher']);
 const STAGED_DEPLOY_APPS = new Set(['cini-dashboard']);
 const NOTIFY_EXCLUDE = new Set(['log-watcher']);
-const HTTPS_APPS = new Set(['whatsapp-webnode', 'webhook-whatsapp', 'whatsapp-motoristas', 'whatsapp-pix-motoristas', 'portal-consultas', 'portal-vagas-rh', 'cini-tracking', 'coleta-sac', 'portal-intranet', 'portal-rnc', 'portal-acoes', 'portal-resultados', 'contagem-armazens', 'solicitacao-fachada']);
+const HTTPS_APPS = new Set(['whatsapp-webnode', 'webhook-whatsapp', 'whatsapp-motoristas', 'whatsapp-pix-motoristas', 'portal-consultas', 'portal-vagas-rh', 'cini-tracking', 'coleta-sac', 'portal-intranet', 'portal-rnc', 'portal-acoes', 'portal-resultados', 'contagem-armazens', 'solicitacao-fachada', 'contagem-produtos', 'erp-cini', 'wf-cini', 'central-tarefas', 'hub-cini', 'cini-pricing', 'notificador-pix', 'whatsapp-bot', 'portal-api', 'portal-ete', 'cini-leads', 'kanban-entregas', 'gestao-importacao-pedidos', 'portal-televendas', 'protheus-auth', 'portal-marketing', 'cini-dashboard']);
 const AUTOPOLL_FILE = path.join(__dirname, '.autopoll.json');
 const CARD_ORDER_FILE = path.join(__dirname, '.card-order.json');
 const DISPLAY_NAMES = {
@@ -1499,6 +1499,8 @@ async function httpSmoke(appName, maxMs = 15000) {
 async function stagedTest(appName, cwdWin, log) {
   const { spawn } = require('child_process');
   const http = require('http');
+  const https = require('https');
+  const client = HTTPS_APPS.has(appName) ? https : http;
   const prodPort = KNOWN_PORTS[appName] || 9999;
   const testPort = prodPort + 1;
   const scriptFile = path.join(cwdWin, 'server.js');
@@ -1530,7 +1532,7 @@ async function stagedTest(appName, cwdWin, log) {
         break;
       }
       const ok = await new Promise(resolve => {
-        const req = http.get({ host: 'localhost', port: testPort, path: '/', timeout: 4000 }, res => {
+        const req = client.get({ host: 'localhost', port: testPort, path: '/', timeout: 4000, rejectUnauthorized: false }, res => {
           resolve(res.statusCode < 500);
         });
         req.on('error',   () => resolve(false));
