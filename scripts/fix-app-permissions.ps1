@@ -1,13 +1,14 @@
-# Corrige a ACL das pastas "logs" de todos os apps do CiniManager para que o usuario
-# que roda o dashboard (nao-administrador) consiga apagar arquivos antigos.
+# Corrige a ACL das pastas de projeto de todos os apps do CiniManager para que o
+# usuario que roda o dashboard (nao-administrador) consiga apagar/recriar arquivos.
 #
-# Alguns logs antigos foram criados por um processo com dono BUILTIN\Administrators /
-# NT AUTHORITY\SYSTEM, deixando o grupo Users so com leitura (sem excluir). Isso faz a
-# limpeza automatica de logs (>30 dias) do CiniManager falhar com "Access is denied"
-# nesses arquivos especificos, mesmo rodando dentro do proprio processo do dashboard.
+# Alguns arquivos/pastas (logs antigos, node_modules de instalacoes antigas) foram
+# criados por um processo com dono BUILTIN\Administrators / NT AUTHORITY\SYSTEM,
+# deixando o grupo Users so com leitura (sem excluir). Isso quebra duas coisas:
+#   1) a limpeza automatica de logs (>30 dias) do CiniManager -- "Access is denied"
+#   2) o auto-deploy (npm ci apos detectar push novo) -- EPERM ao recriar node_modules
 #
 # Rode este script UMA VEZ, como Administrador:
-#   powershell -ExecutionPolicy Bypass -File fix-log-permissions.ps1
+#   powershell -ExecutionPolicy Bypass -File fix-app-permissions.ps1
 
 #Requires -RunAsAdministrator
 
@@ -53,31 +54,17 @@ $apps = @{
 }
 
 $usuario = "$env:USERDOMAIN\$env:USERNAME"
-Write-Output "Concedendo controle total para '$usuario' nas pastas de log de cada app..."
+Write-Output "Concedendo controle total para '$usuario' na pasta inteira de cada app (logs, node_modules, etc)..."
 
 foreach ($nome in $apps.Keys) {
   $dir = $apps[$nome]
   if (-not (Test-Path $dir)) { continue }
-
-  # Pasta logs/ (recursivo)
-  $logsDir = Join-Path $dir "logs"
-  if (Test-Path $logsDir) {
-    try {
-      icacls $logsDir /grant "${usuario}:(OI)(CI)F" /T /C /Q | Out-Null
-      Write-Output "  OK: $logsDir"
-    } catch {
-      Write-Warning "  Falhou em $logsDir : $($_.Exception.Message)"
-    }
-  }
-
-  # *.log soltos na raiz do projeto
-  Get-ChildItem -Path $dir -Filter "*.log" -File -ErrorAction SilentlyContinue | ForEach-Object {
-    try {
-      icacls $_.FullName /grant "${usuario}:F" /C /Q | Out-Null
-    } catch {
-      Write-Warning "  Falhou em $($_.FullName): $($_.Exception.Message)"
-    }
+  try {
+    icacls $dir /grant "${usuario}:(OI)(CI)F" /T /C /Q | Out-Null
+    Write-Output "  OK: $nome ($dir)"
+  } catch {
+    Write-Warning "  Falhou em $dir : $($_.Exception.Message)"
   }
 }
 
-Write-Output "Concluido. Rode a limpeza de novo (ou espere a proxima varredura diaria do dashboard) para confirmar."
+Write-Output "Concluido. A limpeza de logs e o auto-deploy (npm ci) devem funcionar normalmente a partir de agora."
