@@ -1,3 +1,5 @@
+﻿[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
 $BACKUP_ROOT = "E:\Projetos\CiniManager\backups"
 $DATE_FOLDER = Get-Date -Format "yyyy-MM-dd"
 $DEST        = Join-Path $BACKUP_ROOT $DATE_FOLDER

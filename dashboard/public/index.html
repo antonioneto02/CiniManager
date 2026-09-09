@@ -386,7 +386,8 @@ const HTTPS_APPS = new Set([
   'portal-rnc', 'portal-acoes', 'portal-resultados', 'contagem-armazens', 'solicitacao-fachada',
   'contagem-produtos', 'erp-cini', 'wf-cini', 'central-tarefas', 'hub-cini', 'cini-pricing',
   'notificador-pix', 'whatsapp-bot', 'portal-api', 'portal-ete', 'cini-leads', 'kanban-entregas',
-  'gestao-importacao-pedidos', 'portal-televendas', 'protheus-auth', 'portal-marketing', 'cini-dashboard'
+  'gestao-importacao-pedidos', 'portal-televendas', 'protheus-auth', 'portal-marketing', 'cini-dashboard',
+  'formulario-cat'
 ]);
 
 function getDocsUrl(app) {
@@ -432,6 +433,7 @@ const DISPLAY_NAMES = {
   'gestao-importacao-pedidos': 'Gestão de Importação de Pedidos',
   'portal-televendas': 'Portal Televendas',
   'solicitacao-fachada': 'Solicitação de Fachada',
+  'formulario-cat': 'Formulário CAT',
 };
 function displayName(name) { return DISPLAY_NAMES[name] || name; }
 const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');

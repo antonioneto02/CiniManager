@@ -310,13 +310,12 @@ const APP_REGISTRY = {
   'portal-marketing':     'E:/Projetos/PortalMarketing',
   'contagem-armazens':    'E:/Projetos/ContagemArmazens',
   'solicitacao-fachada':  'E:/Projetos/SolicitacaoFachada',
-  'formulario-cat':       'E:/Projetos/FormularioCAT',
 };
 
 const DEPLOY_EXCLUDE    = new Set(['log-watcher']);
 const STAGED_DEPLOY_APPS = new Set(['cini-dashboard']);
 const NOTIFY_EXCLUDE = new Set(['log-watcher']);
-const HTTPS_APPS = new Set(['whatsapp-webnode', 'webhook-whatsapp', 'whatsapp-motoristas', 'whatsapp-pix-motoristas', 'portal-consultas', 'portal-vagas-rh', 'cini-tracking', 'coleta-sac', 'portal-intranet', 'portal-rnc', 'portal-acoes', 'portal-resultados', 'contagem-armazens', 'solicitacao-fachada', 'contagem-produtos', 'erp-cini', 'wf-cini', 'central-tarefas', 'hub-cini', 'cini-pricing', 'notificador-pix', 'whatsapp-bot', 'portal-api', 'portal-ete', 'cini-leads', 'kanban-entregas', 'gestao-importacao-pedidos', 'portal-televendas', 'protheus-auth', 'portal-marketing', 'cini-dashboard', 'formulario-cat']);
+const HTTPS_APPS = new Set(['whatsapp-webnode', 'webhook-whatsapp', 'whatsapp-motoristas', 'whatsapp-pix-motoristas', 'portal-consultas', 'portal-vagas-rh', 'cini-tracking', 'coleta-sac', 'portal-intranet', 'portal-rnc', 'portal-acoes', 'portal-resultados', 'contagem-armazens', 'solicitacao-fachada', 'contagem-produtos', 'erp-cini', 'wf-cini', 'central-tarefas', 'hub-cini', 'cini-pricing', 'notificador-pix', 'whatsapp-bot', 'portal-api', 'portal-ete', 'cini-leads', 'kanban-entregas', 'gestao-importacao-pedidos', 'portal-televendas', 'protheus-auth', 'portal-marketing', 'cini-dashboard']);
 const AUTOPOLL_FILE = path.join(__dirname, '.autopoll.json');
 const CARD_ORDER_FILE = path.join(__dirname, '.card-order.json');
 const DISPLAY_NAMES = {

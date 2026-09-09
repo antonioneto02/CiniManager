@@ -1,3 +1,5 @@
+﻿[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
 $DESTINATARIO  = "554188529918"
 $ALERT_FILE    = "$PSScriptRoot\last-alerts.json"
 $STATE_FILE    = "$PSScriptRoot\health-state.json"
@@ -13,31 +15,28 @@ function Write-Log($msg) {
 }
 
 function Insert-Notificacao($mensagem) {
-    try {
-        $connStr = "Server=$DB_SERVER;Database=$DB_NAME;User Id=$DB_USER;Password=$DB_PASSWORD;TrustServerCertificate=True;"
-        $conn = New-Object System.Data.SqlClient.SqlConnection($connStr)
-        $conn.Open()
-        $cmd = $conn.CreateCommand()
-        $cmd.CommandText = @"
-INSERT INTO [dbo].[FATO_FILA_NOTIFICACOES]
-  (TIPO_MENSAGEM, DESTINATARIO, MENSAGEM, STATUS, TENTATIVAS, DTINC)
-VALUES
-  ('texto', @dest, @msg, 'PENDENTE', 0, GETDATE())
-"@
-        $cmd.Parameters.AddWithValue("@dest", $DESTINATARIO) | Out-Null
-        $cmd.Parameters.AddWithValue("@msg",  $mensagem)      | Out-Null
-        $cmd.ExecuteNonQuery() | Out-Null
-        $conn.Close()
-        return $true
-    } catch {
-        Write-Log "ERRO ao inserir notificação: $_"
-        return $false
+    # Desativado: essa fila (FATO_FILA_NOTIFICACOES) é a mesma usada para notificações
+    # de cliente (confirmação de PIX etc.) e o volume de alertas internos estava
+    # atrasando essas mensagens. Alertas internos agora só vão pro log.
+    Write-Log "(notificacao desativada, so log) $mensagem"
+    return $true
+}
+
+function ConvertTo-HashtableCompat($obj) {
+    # Windows PowerShell 5.1 nao tem ConvertFrom-Json -AsHashtable (so existe no 7+).
+    # Converte o PSCustomObject retornado pelo ConvertFrom-Json normal manualmente.
+    $ht = @{}
+    if ($obj) {
+        foreach ($prop in $obj.PSObject.Properties) {
+            $ht[$prop.Name] = $prop.Value
+        }
     }
+    return $ht
 }
 
 function Load-Alerts {
     if (Test-Path $ALERT_FILE) {
-        try { return Get-Content $ALERT_FILE -Raw | ConvertFrom-Json -AsHashtable }
+        try { return ConvertTo-HashtableCompat (Get-Content $ALERT_FILE -Raw | ConvertFrom-Json) }
         catch { }
     }
     return @{}
@@ -49,7 +48,7 @@ function Save-Alerts($alerts) {
 
 function Load-State {
     if (Test-Path $STATE_FILE) {
-        try { return Get-Content $STATE_FILE -Raw | ConvertFrom-Json -AsHashtable }
+        try { return ConvertTo-HashtableCompat (Get-Content $STATE_FILE -Raw | ConvertFrom-Json) }
         catch { }
     }
     return @{}
@@ -62,8 +61,13 @@ function Save-State($state) {
 Write-Log "Verificando status dos processos PM2..."
 
 try {
-    $pm2Json   = pm2 jlist 2>$null
-    $processes = $pm2Json | ConvertFrom-Json
+    # pm2_env carrega uma copia de todas as variaveis de ambiente do processo pai,
+    # incluindo pares que so diferem em maiusculas/minusculas (ex: username/USERNAME).
+    # ConvertFrom-Json no Windows PowerShell 5.1 nao aceita isso (chaves colidem, sao
+    # case-insensitive). Por isso extraimos so os campos que interessam via node antes
+    # de converter para objeto do PowerShell.
+    $slimJson  = pm2 jlist 2>$null | node "$PSScriptRoot\pm2-jlist-slim.js"
+    $processes = $slimJson | ConvertFrom-Json
 } catch {
     Write-Log "ERRO ao consultar PM2: $_"
     exit 1
@@ -83,7 +87,7 @@ $appProcesses = $processes | Where-Object { $_.name -notlike "pm2-*" -and $_.nam
 
 foreach ($proc in $appProcesses) {
     $name   = $proc.name
-    $status = $proc.pm2_env.status
+    $status = $proc.status
 
     Write-Log "  $name → $status"
 
@@ -120,9 +124,9 @@ if ($jaNotificouBoot) {
 }
 
 if ($uptimeMin -lt 15 -and -not $jaNotificouBoot) {
-    $todosOnline = ($appProcesses | Where-Object { $_.pm2_env.status -ne "online" }).Count -eq 0
+    $todosOnline = ($appProcesses | Where-Object { $_.status -ne "online" }).Count -eq 0
     $totalApps   = $appProcesses.Count
-    $onlineApps  = ($appProcesses | Where-Object { $_.pm2_env.status -eq "online" }).Count
+    $onlineApps  = ($appProcesses | Where-Object { $_.status -eq "online" }).Count
 
     $ts  = Get-Date -Format "dd/MM/yyyy HH:mm"
     $msg = "🖥️ *SERVIDOR REINICIADO*`n🕐 $ts`n`n"
@@ -135,7 +139,7 @@ if ($uptimeMin -lt 15 -and -not $jaNotificouBoot) {
     } else {
         $msg += "⚠️ *$onlineApps/$totalApps* apps online após boot`n"
         foreach ($proc in $appProcesses | Sort-Object { $_.name }) {
-            $icon = if ($proc.pm2_env.status -eq "online") { "✅" } else { "❌" }
+            $icon = if ($proc.status -eq "online") { "✅" } else { "❌" }
             $msg += "  $icon $($proc.name)`n"
         }
     }
@@ -154,15 +158,15 @@ $lastHeartbeat = $state["lastHeartbeat"]
 $jaEnviouHoje  = ($lastHeartbeat -eq $hoje)
 
 if ($horaAtual -eq $HEARTBEAT_HORA -and $minAtual -lt 10 -and -not $jaEnviouHoje) {
-    $todosOnline = ($appProcesses | Where-Object { $_.pm2_env.status -ne "online" }).Count -eq 0
-    $onlineApps  = ($appProcesses | Where-Object { $_.pm2_env.status -eq "online" }).Count
+    $todosOnline = ($appProcesses | Where-Object { $_.status -ne "online" }).Count -eq 0
+    $onlineApps  = ($appProcesses | Where-Object { $_.status -eq "online" }).Count
     $totalApps   = $appProcesses.Count
 
     if ($todosOnline) {
         $linhas = ($appProcesses | Sort-Object { $_.name } | ForEach-Object {
-            $mem     = [math]::Round($_.monit.memory / 1024 / 1024)
-            $uptime  = if ($_.pm2_env.pm_uptime) {
-                $diff = ($now - ([DateTimeOffset]::FromUnixTimeMilliseconds($_.pm2_env.pm_uptime)).DateTime)
+            $mem     = [math]::Round($_.memory / 1024 / 1024)
+            $uptime  = if ($_.pm_uptime) {
+                $diff = ($now - ([DateTimeOffset]::FromUnixTimeMilliseconds($_.pm_uptime)).DateTime)
                 if ($diff.TotalDays -ge 1) { "$([int]$diff.TotalDays)d $($diff.Hours)h" }
                 elseif ($diff.TotalHours -ge 1) { "$([int]$diff.TotalHours)h $($diff.Minutes)m" }
                 else { "$($diff.Minutes)m" }
@@ -174,7 +178,7 @@ if ($horaAtual -eq $HEARTBEAT_HORA -and $minAtual -lt 10 -and -not $jaEnviouHoje
     } else {
         $msg = "⚠️ *RESUMO DIÁRIO*`n🕐 $(Get-Date -Format 'dd/MM/yyyy HH:mm')`n`n*$onlineApps/$totalApps apps online*`n"
         foreach ($proc in $appProcesses | Sort-Object { $_.name }) {
-            $icon = if ($proc.pm2_env.status -eq "online") { "✅" } else { "❌" }
+            $icon = if ($proc.status -eq "online") { "✅" } else { "❌" }
             $msg += "  $icon $($proc.name)`n"
         }
     }
