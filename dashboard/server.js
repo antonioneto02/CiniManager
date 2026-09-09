@@ -357,7 +357,6 @@ const DISPLAY_NAMES = {
   'portal-marketing':   'Portal do Marketing',
   'contagem-armazens':  'Contagem de Armazéns',
   'solicitacao-fachada': 'Solicitação de Fachada',
-  'formulario-cat':     'Formulário CAT',
 };
 
 function appLabel(name) {
@@ -634,11 +633,18 @@ async function updateServiceGroup(groupId, apps) {
 }
 
 async function sendWhatsApp(msg) {
-  // Desativado: inserir aqui competia na mesma fila (FATO_FILA_NOTIFICACOES) usada
-  // para notificações de cliente (ex.: confirmação de PIX), atrasando-as por volume.
-  // Alertas internos agora só vão pro console — plugar um canal separado (Google Chat,
-  // e-mail etc.) se ainda for necessário receber isso fora do log.
-  console.log(`[wpp] (desativado, não enfileirado) ${msg.replace(/\n/g, ' | ').slice(0, 300)}`);
+  try {
+    const p = await getPool();
+    await p.request()
+      .input('dest', sql.NVarChar(50),   WPP_DEST)
+      .input('msg',  sql.NVarChar(4000), msg)
+      .query(`INSERT INTO [dbo].[FATO_FILA_NOTIFICACOES]
+                (TIPO_MENSAGEM, DESTINATARIO, MENSAGEM, STATUS, TENTATIVAS, DTINC)
+              VALUES ('texto', @dest, @msg, 'PENDENTE', 0, GETDATE())`);
+  } catch (e) {
+    console.error('[wpp] Falha:', e.message);
+    _pool = null;
+  }
 }
 
 function trimText(text, max = 500) {
