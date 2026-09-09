@@ -199,6 +199,7 @@ app.post('/login', async (req, res) => {
           username,
           password,
         },
+        headers: { 'X-Client-IP': req.ip },
       }
     );
     const accessToken = tokenResp?.data?.access_token;
@@ -309,12 +310,13 @@ const APP_REGISTRY = {
   'portal-marketing':     'E:/Projetos/PortalMarketing',
   'contagem-armazens':    'E:/Projetos/ContagemArmazens',
   'solicitacao-fachada':  'E:/Projetos/SolicitacaoFachada',
+  'formulario-cat':       'E:/Projetos/FormularioCAT',
 };
 
 const DEPLOY_EXCLUDE    = new Set(['log-watcher']);
 const STAGED_DEPLOY_APPS = new Set(['cini-dashboard']);
 const NOTIFY_EXCLUDE = new Set(['log-watcher']);
-const HTTPS_APPS = new Set(['whatsapp-webnode', 'webhook-whatsapp', 'whatsapp-motoristas', 'whatsapp-pix-motoristas', 'portal-consultas', 'portal-vagas-rh', 'cini-tracking', 'coleta-sac', 'portal-intranet', 'portal-rnc', 'portal-acoes', 'portal-resultados', 'contagem-armazens', 'solicitacao-fachada', 'contagem-produtos', 'erp-cini', 'wf-cini', 'central-tarefas', 'hub-cini', 'cini-pricing', 'notificador-pix', 'whatsapp-bot', 'portal-api', 'portal-ete', 'cini-leads', 'kanban-entregas', 'gestao-importacao-pedidos', 'portal-televendas', 'protheus-auth', 'portal-marketing', 'cini-dashboard']);
+const HTTPS_APPS = new Set(['whatsapp-webnode', 'webhook-whatsapp', 'whatsapp-motoristas', 'whatsapp-pix-motoristas', 'portal-consultas', 'portal-vagas-rh', 'cini-tracking', 'coleta-sac', 'portal-intranet', 'portal-rnc', 'portal-acoes', 'portal-resultados', 'contagem-armazens', 'solicitacao-fachada', 'contagem-produtos', 'erp-cini', 'wf-cini', 'central-tarefas', 'hub-cini', 'cini-pricing', 'notificador-pix', 'whatsapp-bot', 'portal-api', 'portal-ete', 'cini-leads', 'kanban-entregas', 'gestao-importacao-pedidos', 'portal-televendas', 'protheus-auth', 'portal-marketing', 'cini-dashboard', 'formulario-cat']);
 const AUTOPOLL_FILE = path.join(__dirname, '.autopoll.json');
 const CARD_ORDER_FILE = path.join(__dirname, '.card-order.json');
 const DISPLAY_NAMES = {
@@ -356,6 +358,7 @@ const DISPLAY_NAMES = {
   'portal-marketing':   'Portal do Marketing',
   'contagem-armazens':  'Contagem de Armazéns',
   'solicitacao-fachada': 'Solicitação de Fachada',
+  'formulario-cat':     'Formulário CAT',
 };
 
 function appLabel(name) {
@@ -632,18 +635,11 @@ async function updateServiceGroup(groupId, apps) {
 }
 
 async function sendWhatsApp(msg) {
-  try {
-    const p = await getPool();
-    await p.request()
-      .input('dest', sql.NVarChar(50),   WPP_DEST)
-      .input('msg',  sql.NVarChar(4000), msg)
-      .query(`INSERT INTO [dbo].[FATO_FILA_NOTIFICACOES]
-                (TIPO_MENSAGEM, DESTINATARIO, MENSAGEM, STATUS, TENTATIVAS, DTINC)
-              VALUES ('texto', @dest, @msg, 'PENDENTE', 0, GETDATE())`);
-  } catch (e) {
-    console.error('[wpp] Falha:', e.message);
-    _pool = null;
-  }
+  // Desativado: inserir aqui competia na mesma fila (FATO_FILA_NOTIFICACOES) usada
+  // para notificações de cliente (ex.: confirmação de PIX), atrasando-as por volume.
+  // Alertas internos agora só vão pro console — plugar um canal separado (Google Chat,
+  // e-mail etc.) se ainda for necessário receber isso fora do log.
+  console.log(`[wpp] (desativado, não enfileirado) ${msg.replace(/\n/g, ' | ').slice(0, 300)}`);
 }
 
 function trimText(text, max = 500) {
