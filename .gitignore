@@ -8,3 +8,9 @@ logs/
 cini-dashboard-restart-log.txt
 dashboard/.autopoll.json
 dashboard/.card-order.json
+backups/
+*.key
+*.cer
+*.crt
+*.pem
+*.pfx
