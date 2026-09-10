@@ -652,6 +652,13 @@ function trimText(text, max = 500) {
   return clean.length > max ? clean.slice(0, max - 1) + '…' : clean;
 }
 
+function shouldNotifyDeploy(signature, windowMs) {
+  const last = deployNotifyThrottle.get(signature) || 0;
+  if (Date.now() - last < windowMs) return false;
+  deployNotifyThrottle.set(signature, Date.now());
+  return true;
+}
+
 async function notifyWhatsApp(title, lines = []) {
   const body = lines.filter(Boolean).join('\n');
   const signature = normalizeErrorSignature(`${title} ${body}`);
@@ -688,6 +695,9 @@ const NOTIFY_DUP_WINDOW_MS = 5 * 60 * 1000;
 const APP_ERROR_DUP_WINDOW_MS = 5 * 60 * 1000; 
 const GIT_ALERT_DUP_WINDOW_MS = 4 * 60 * 60 * 1000;  // 4h — erros persistentes (auth/rede) não spamam
 const PM2_EVENT_DUP_WINDOW_MS = 5 * 60 * 1000;
+const deployNotifyThrottle = new Map();
+const DEPLOY_FAIL_DUP_WINDOW_MS = 60 * 60 * 1000;   // 1h — mesma falha de deploy não repete
+const UPDATE_DETECTED_DUP_WINDOW_MS = 60 * 60 * 1000; // 1h — mesmo commit remoto não repete "atualização detectada"
 const ALERT_VISIBLE_MS = 6 * 60 * 60 * 1000;
 
 const whatsappStuckRestartThrottle = new Map();
@@ -1138,6 +1148,8 @@ setInterval(() => {
   for (const [k, v] of gitAlertThrottle) if (v < cutoff) gitAlertThrottle.delete(k);
   for (const [k, v] of recentNotifications) if (v < cutoff) recentNotifications.delete(k);
   for (const k of Object.keys(pollErrorLogAt)) if (pollErrorLogAt[k] < cutoff) delete pollErrorLogAt[k];
+  const deployCutoff = Date.now() - Math.max(DEPLOY_FAIL_DUP_WINDOW_MS, UPDATE_DETECTED_DUP_WINDOW_MS);
+  for (const [k, v] of deployNotifyThrottle) if (v < deployCutoff) deployNotifyThrottle.delete(k);
 }, 15 * 60 * 1000);
 
 // Descobre o PID que está ouvindo (LISTENING) em uma porta TCP, via netstat.
@@ -2043,8 +2055,13 @@ async function deployApp(appName) {
       source: 'deploy',
       detail: err.message,
     });
-    await sendWhatsApp(wppMsg);
-    setBotAdminPending('ask_restart', appName, `Deseja reiniciar *${appLabel(appName)}* após a falha no deploy?`).catch(() => {});
+    const failSig = `fail:${appName}:${normalizeErrorSignature(err.message)}`;
+    if (shouldNotifyDeploy(failSig, DEPLOY_FAIL_DUP_WINDOW_MS)) {
+      await sendWhatsApp(wppMsg);
+      setBotAdminPending('ask_restart', appName, `Deseja reiniciar *${appLabel(appName)}* após a falha no deploy?`).catch(() => {});
+    } else {
+      console.log(`[deploy:${appName}] "Deploy FALHOU" suprimido (mesma falha notificada na última 1h)`);
+    }
     const rec = { time: now(), app: appName, status: 'error', detail: err.message };
     addDeployHistory(rec);
     throw err;
@@ -2303,12 +2320,17 @@ async function pollGitUpdates() {
       console.log(`[poll] ${appName}: ${pending.length} commit(s) novo(s) — iniciando auto-deploy`);
       bufferLog(appName, 'deploy', `🔔 Auto-deploy: ${pending.length} commit(s) novo(s) detectado(s) no remoto`);
 
-      await sendWhatsApp(
-        `🔔 *Atualização detectada*\n📦 ${appLabel(appName)} (${branch})\n` +
-        `📊 ${pending.length} commit(s) novo(s)\n` +
-        (commitList ? `\n📝 Commits:\n${commitList}\n` : '') +
-        `\n⏳ Iniciando auto-deploy...`
-      );
+      const detectedSig = `detected:${appName}:${remoteHash}`;
+      if (shouldNotifyDeploy(detectedSig, UPDATE_DETECTED_DUP_WINDOW_MS)) {
+        await sendWhatsApp(
+          `🔔 *Atualização detectada*\n📦 ${appLabel(appName)} (${branch})\n` +
+          `📊 ${pending.length} commit(s) novo(s)\n` +
+          (commitList ? `\n📝 Commits:\n${commitList}\n` : '') +
+          `\n⏳ Iniciando auto-deploy...`
+        );
+      } else {
+        console.log(`[poll] ${appName}: "atualização detectada" suprimida (já notificada p/ ${remoteHash} na última 1h) — tentando auto-deploy de novo`);
+      }
 
       await deployApp(appName);
       if (!autoPollCfg.apps[appName]) autoPollCfg.apps[appName] = {};
