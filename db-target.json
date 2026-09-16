@@ -1,0 +1,136 @@
+{
+  "environments": {
+    "local": {
+      "label": "Local (padrão atual)",
+      "dbHost": "localhost",
+      "p11ProdDb": "p11_prod"
+    },
+    "remote": {
+      "label": "Servidor remoto 177.104.136.230",
+      "dbHost": "177.104.136.230",
+      "p11ProdDb": "p2510"
+    }
+  },
+  "apps": {
+    "webhook-whatsapp": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.432Z"
+    },
+    "whatsapp-bot": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.388Z"
+    },
+    "whatsapp-webnode": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.391Z"
+    },
+    "portal-streamlit": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.393Z"
+    },
+    "gerenciador-cargas": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.395Z"
+    },
+    "portal-intranet": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.413Z"
+    },
+    "portal-televendas": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.415Z"
+    },
+    "solicitacao-fachada": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.417Z"
+    },
+    "portal-ete": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.419Z"
+    },
+    "coleta-sac": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.422Z"
+    },
+    "lp-negocios": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.424Z"
+    },
+    "cini-leads": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.426Z"
+    },
+    "central-tarefas": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.429Z"
+    },
+    "hub-cini": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.466Z"
+    },
+    "api-sicredi": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:38:39.133Z"
+    },
+    "kanban-entregas": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.434Z"
+    },
+    "gestao-importacao-pedidos": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.437Z"
+    },
+    "whatsapp-motoristas": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.443Z"
+    },
+    "api-weduu": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.446Z"
+    },
+    "cini-pricing": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.448Z"
+    },
+    "erp-cini": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.450Z"
+    },
+    "portal-rnc": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.451Z"
+    },
+    "portal-acoes": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.453Z"
+    },
+    "notificador-pix": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.455Z"
+    },
+    "central-notificacoes": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.457Z"
+    },
+    "portal-vagas-rh": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.459Z"
+    },
+    "assistente-ia": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.462Z"
+    },
+    "wf-cini": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.464Z"
+    },
+    "portal-consultas": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.440Z"
+    },
+    "cini-dashboard": {
+      "target": "local",
+      "updatedAt": "2026-09-16T12:42:12.468Z"
+    }
+  }
+}

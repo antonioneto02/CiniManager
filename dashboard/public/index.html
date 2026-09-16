@@ -28,6 +28,8 @@ body{background:var(--bg);color:var(--text);font-family:'Cascadia Code','Fira Co
 .badge{padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
 .badge-green{background:#0f2b1a;color:var(--green)}
 .badge-red{background:#2d0f0f;color:var(--red)}
+.badge-yellow{background:#332600;color:var(--yellow)}
+.badge-blue{background:#0d1f3c;color:var(--blue)}
 .badge-muted{background:var(--surface2);color:var(--muted)}
 .polling-badge{display:inline-flex;align-items:center;gap:6px;line-height:1;overflow:visible;padding:4px 8px}
 .polling-badge .spin{width:12px;height:12px;border-width:2px;margin-right:0;flex-shrink:0}
@@ -194,6 +196,7 @@ mark.log-hl{background:#d29922;color:#000;border-radius:2px;padding:0 2px;font-s
     <div class="subbar-right">
       <button class="btn btn-sm btn-blue" onclick="openAutoPoll()" id="btn-autopoll">🔄 Auto-deploy</button>
       <button class="btn btn-sm btn-yellow" onclick="openRestartResetModal()">🧹 Limpar restarts</button>
+      <button class="btn btn-sm" id="btn-db-target" onclick="openDbTarget()">🗄️ Banco: …</button>
       <button class="btn btn-sm btn-orange" onclick="doDeployAll()">🚀 Deploy All</button>
       <button class="btn btn-sm btn-red" onclick="actionAll('stop')">⏹ Stop All</button>
       <button class="btn btn-sm" onclick="location.href='/logout'">🔐 Sair</button>
@@ -277,6 +280,17 @@ mark.log-hl{background:#d29922;color:#000;border-radius:2px;padding:0 2px;font-s
     </div>
     <div class="modal-body" id="autopoll-body"><span class="spin"></span> Carregando...</div>
     <div class="modal-footer" id="autopoll-footer"></div>
+  </div>
+</div>
+
+<div class="modal-bg" id="db-target-modal">
+  <div class="modal" style="width:720px;max-width:95vw">
+    <div class="modal-head">
+      <span class="modal-head-title">🗄️ Servidor de Banco de Dados</span>
+      <button class="btn btn-sm" onclick="closeDbTarget()">✕</button>
+    </div>
+    <div class="modal-body" id="db-target-body"><span class="spin"></span> Carregando...</div>
+    <div class="modal-footer" id="db-target-footer"></div>
   </div>
 </div>
 
@@ -966,6 +980,123 @@ function toggleAllRestartReset(checked) {
   document.querySelectorAll('.restart-reset-check').forEach(el => {
     el.checked = checked;
   });
+}
+
+// ─── Flag manual: servidor de banco de dados (local <-> remoto) ────────────
+const DB_TARGET_STATUS_LABEL = {
+  safe: 'OK',
+  'needs-code-fix': 'Precisa correção',
+  special: 'Caso especial',
+};
+const DB_TARGET_STATUS_CLASS = {
+  safe: 'badge-green',
+  'needs-code-fix': 'badge-yellow',
+  special: 'badge-red',
+};
+
+async function refreshDbTargetBadge() {
+  const btn = document.getElementById('btn-db-target');
+  if (!btn) return;
+  try {
+    const data = await api('GET', '/api/db-target');
+    const switchable = data.apps.filter(a => a.status === 'safe');
+    const remoteCount = switchable.filter(a => a.target === 'remote').length;
+    let label;
+    if (remoteCount === 0) label = '🗄️ Banco: LOCAL';
+    else if (remoteCount === switchable.length) label = '🗄️ Banco: REMOTO';
+    else label = `🗄️ Banco: MISTO (${remoteCount}/${switchable.length})`;
+    btn.textContent = label;
+  } catch (e) {
+    btn.textContent = '🗄️ Banco: ?';
+  }
+}
+
+async function openDbTarget() {
+  document.getElementById('db-target-body').innerHTML = '<span class="spin"></span> Carregando...';
+  document.getElementById('db-target-footer').innerHTML = '';
+  document.getElementById('db-target-modal').classList.add('open');
+
+  try {
+    const data = await api('GET', '/api/db-target');
+    renderDbTarget(data);
+  } catch (e) {
+    document.getElementById('db-target-body').innerHTML = `<span style="color:var(--red)">Erro: ${esc(e.message)}</span>`;
+  }
+}
+
+function closeDbTarget() {
+  document.getElementById('db-target-modal').classList.remove('open');
+}
+document.getElementById('db-target-modal').addEventListener('click', e => { if (e.target === e.currentTarget) closeDbTarget(); });
+
+function renderDbTarget(data) {
+  const { environments, apps } = data;
+  const switchable = apps.filter(a => a.status === 'safe');
+  const remoteCount = switchable.filter(a => a.target === 'remote').length;
+
+  const rows = apps
+    .slice()
+    .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'))
+    .map(a => `<tr>
+      <td style="padding:6px;font-weight:600">${esc(a.label)}</td>
+      <td style="padding:6px;text-align:center">
+        <span class="badge ${DB_TARGET_STATUS_CLASS[a.status] || 'badge-muted'}" style="font-size:10px">${esc(DB_TARGET_STATUS_LABEL[a.status] || a.status)}</span>
+      </td>
+      <td style="padding:6px;text-align:center">
+        <span class="badge ${a.target === 'remote' ? 'badge-blue' : 'badge-muted'}" style="font-size:10px">${a.target === 'remote' ? 'REMOTO' : 'LOCAL'}</span>
+      </td>
+      <td style="padding:6px;color:var(--muted);font-size:11px">${esc(a.notes || (a.usesP11Prod ? 'usa p11_prod/p2510' : ''))}</td>
+    </tr>`)
+    .join('');
+
+  const naoSwitchable = apps.filter(a => a.status !== 'safe');
+
+  document.getElementById('db-target-body').innerHTML = `
+    <div class="section" style="margin-bottom:10px">
+      <p style="color:var(--muted);font-size:12px;margin-bottom:6px">
+        Servidor local: <b>${esc(environments.local.dbHost)}</b> (banco <b>${esc(environments.local.p11ProdDb)}</b>) &nbsp;·&nbsp;
+        Servidor remoto: <b>${esc(environments.remote.dbHost)}</b> (banco <b>${esc(environments.remote.p11ProdDb)}</b>)
+      </p>
+      <p style="color:var(--muted);font-size:12px;margin-bottom:10px">
+        ${switchable.length} de ${apps.length} aplicações estão prontas pra troca automática (status "OK").
+        Hoje: <b>${remoteCount}</b> no remoto, <b>${switchable.length - remoteCount}</b> no local.
+        ${naoSwitchable.length ? `As demais (${naoSwitchable.length}) não são trocadas por este botão — veja a observação de cada uma.` : ''}
+      </p>
+      <table class="commit-tbl">
+        <tr>
+          <th style="color:var(--muted);font-size:10px;padding:6px">APP</th>
+          <th style="color:var(--muted);font-size:10px;padding:6px;text-align:center">SITUAÇÃO</th>
+          <th style="color:var(--muted);font-size:10px;padding:6px;text-align:center">ALVO ATUAL</th>
+          <th style="color:var(--muted);font-size:10px;padding:6px">OBS</th>
+        </tr>
+        ${rows}
+      </table>
+    </div>`;
+
+  document.getElementById('db-target-footer').innerHTML = `
+    <button class="btn" onclick="doDbTargetSwitch('local')">🏠 Tudo para LOCAL</button>
+    <button class="btn btn-blue" onclick="doDbTargetSwitch('remote')">☁️ Tudo para REMOTO</button>
+    <button class="btn" onclick="closeDbTarget()">Fechar</button>`;
+}
+
+async function doDbTargetSwitch(target) {
+  const label = target === 'remote' ? 'REMOTO (177.104.136.230, p2510)' : 'LOCAL (localhost, p11_prod)';
+  if (!confirm(`Tem certeza que quer trocar TODAS as aplicações prontas para ${label}?\n\nIsso vai reiniciar essas aplicações via PM2.`)) {
+    return;
+  }
+  document.getElementById('db-target-body').innerHTML = '<span class="spin"></span> Aplicando e reiniciando aplicações via PM2 (pode levar até 1-2 minutos)...';
+  document.getElementById('db-target-footer').innerHTML = '';
+  try {
+    const result = await api('POST', '/api/db-target/switch', { target });
+    toast(`Banco alterado para ${target === 'remote' ? 'REMOTO' : 'LOCAL'} com sucesso`);
+    await refreshDbTargetBadge();
+    const data = await api('GET', '/api/db-target');
+    renderDbTarget(data);
+  } catch (e) {
+    toast(e.message, 'err');
+    const data = await api('GET', '/api/db-target');
+    renderDbTarget(data);
+  }
 }
 
 async function doDeploy(name) {
@@ -1983,10 +2114,12 @@ async function runPixFallback() {
 
 (async()=>{
   await loadApps();
+  refreshDbTargetBadge();
   startHistorySSE();
   startErrorHistorySSE();
   setHistoryMode('deploy');
   setInterval(loadApps, 5000);
+  setInterval(refreshDbTargetBadge, 60000);
   setInterval(()=>{
     document.getElementById('bdg-time').textContent =
       new Date().toLocaleTimeString('pt-BR');

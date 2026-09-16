@@ -310,6 +310,7 @@ const APP_REGISTRY = {
   'portal-marketing':     'E:/Projetos/PortalMarketing',
   'contagem-armazens':    'E:/Projetos/ContagemArmazens',
   'solicitacao-fachada':  'E:/Projetos/SolicitacaoFachada',
+  'assistente-ia':        'E:/Projetos/AssistenteIA',
 };
 
 const DEPLOY_EXCLUDE    = new Set(['log-watcher']);
@@ -357,6 +358,7 @@ const DISPLAY_NAMES = {
   'portal-marketing':   'Portal do Marketing',
   'contagem-armazens':  'Contagem de Armazéns',
   'solicitacao-fachada': 'Solicitação de Fachada',
+  'assistente-ia':      'Assistente IA',
 };
 
 function appLabel(name) {
@@ -396,10 +398,10 @@ const WPP_DEST       = '554188529918';
 const CINI_BOT_TOKEN = process.env.CINI_BOT_TOKEN || '';
 const BOT_API_URL    = process.env.BOT_API_URL    || 'https://consultas.cini.com.br:3001';
 const DB_CFG   = {
-  server:   'localhost',
-  database: 'dw',
-  user:     'cini.tracking',
-  password: 'k00b82f6j9TO6alM',
+  server:   process.env.DB_SERVER_TRACKING || 'localhost',
+  database: process.env.DB_DATABASE_DW || 'dw',
+  user:     process.env.DB_TRACKING_USER || 'cini.tracking',
+  password: process.env.DB_TRACKING_PASSWORD || 'k00b82f6j9TO6alM',
   options:  { trustServerCertificate: true, encrypt: false },
   pool:     { max: 3, min: 0, idleTimeoutMillis: 10000 },
 };
@@ -1077,7 +1079,7 @@ async function loadHistoriesFromDB() {
 function bufferLog(appName, source, text, fileLabel) {
   if (!logBuffers[appName]) logBuffers[appName] = [];
   const entry = { time: new Date().toISOString(), source, text };
-  if (fileLabel) entry.file = fileLabel; // label do arquivo de origem (para filtragem no frontend)
+  if (fileLabel) entry.file = fileLabel; 
   logBuffers[appName].push(entry);
   if (logBuffers[appName].length > LOG_MAX) logBuffers[appName].shift();
   (sseClients[appName] || []).forEach(r => {
@@ -1185,11 +1187,6 @@ async function aguardarPortaLivre(port, tentativas, intervaloMs) {
   return false;
 }
 
-// Confere se a porta configurada para o app já está livre; se um processo zumbi
-// (que o pm2 não está mais controlando, sobrevivente de um stop/restart anterior)
-// ainda estiver ouvindo nela, mata esse processo antes de deixar o app subir de novo.
-// Isso evita o clássico EADDRINUSE em loop de restart quando o processo antigo não
-// libera a porta a tempo do pm2 subir o novo.
 async function garantirPortaLivre(name) {
   let porta;
   try {
@@ -1200,7 +1197,8 @@ async function garantirPortaLivre(name) {
   } catch {
     porta = null;
   }
-  if (!porta) return; // app sem porta HTTP conhecida (ex: bots) — nada a garantir
+  if (!porta) porta = readAppPort(name); 
+  if (!porta) return; 
 
   const livre = await aguardarPortaLivre(porta, 6, 500);
   if (livre) return;
@@ -1236,9 +1234,7 @@ async function pm2Do(action, target) {
   return pm2DoRaw(action, target);
 }
 
-// ── Limpeza automática de logs antigos (roda dentro do próprio processo do
-// dashboard, não como app pm2 separado, para não brigar com o fs.watch que
-// esse mesmo processo mantém nos arquivos de log de cada app) ─────────────
+
 const LOG_CLEANUP_MAX_AGE_DIAS = 30;
 const LOG_FILE_RE = /\.log(\.\d+)?(\.gz)?$/i;
 
@@ -1275,9 +1271,6 @@ function coletarArquivosDeLog(dir) {
   return achados;
 }
 
-// Arquivos que já falharam por permissão (ACL restrita, dono Administrators/SYSTEM
-// e o usuário do dashboard sem direito de exclusão) — sem elevar privilégios não tem
-// como remover, então avisamos uma vez só por processo em vez de repetir todo dia.
 const logCleanupSemPermissao = new Set();
 
 function limparLogsAntigosDoApp(nome, dir) {
@@ -2416,6 +2409,63 @@ function readAppPort(appName) {
   return null;
 }
 
+const CINI_ROOT = path.join(__dirname, '..');
+const DB_TARGET_PATH = path.join(CINI_ROOT, 'db-target.json');
+const DB_APPS_REGISTRY_PATH = path.join(CINI_ROOT, 'scripts', 'db-apps-registry.js');
+
+function loadDbTargetState() {
+  return JSON.parse(fs.readFileSync(DB_TARGET_PATH, 'utf8'));
+}
+
+function loadDbAppsRegistry() {
+  delete require.cache[require.resolve(DB_APPS_REGISTRY_PATH)];
+  return require(DB_APPS_REGISTRY_PATH);
+}
+
+app.get('/api/db-target', (req, res) => {
+  try {
+    const state = loadDbTargetState();
+    const registry = loadDbAppsRegistry();
+    const apps = registry.map(a => {
+      const saved = state.apps[a.name];
+      return {
+        name: a.name,
+        label: appLabel(a.name),
+        status: a.status,
+        usesP11Prod: !!a.usesP11Prod,
+        notes: a.notes || null,
+        target: (saved && saved.target) || 'local',
+        updatedAt: (saved && saved.updatedAt) || null,
+      };
+    });
+    res.json({ environments: state.environments, apps });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/db-target/switch', (req, res) => {
+  const target = req.body && req.body.target;
+  if (target !== 'local' && target !== 'remote') {
+    return res.status(400).json({ error: 'target deve ser "local" ou "remote"' });
+  }
+  const who = (req.session && (req.session.displayName || req.session.username)) || '?';
+  const args = ['scripts/apply-db-target.js', `--target=${target}`, '--apply', '--restart'];
+  execFile('node', args, {
+    cwd: CINI_ROOT,
+    timeout: 180000,
+    windowsHide: true,
+    maxBuffer: 10 * 1024 * 1024,
+  }, (err, stdout, stderr) => {
+    if (err) {
+      addDeployHistory({ time: now(), app: 'db-target', status: 'error', detail: `Falha ao trocar flag de banco para "${target}" (${who}): ${stderr || err.message}` });
+      return res.status(500).json({ error: stderr || err.message, output: stdout });
+    }
+    addDeployHistory({ time: now(), app: 'db-target', status: 'ok', detail: `Flag de banco alterada para "${target}" por ${who}` });
+    res.json({ ok: true, output: stdout });
+  });
+});
+
 app.get('/api/apps', async (req, res) => {
   try {
     const latestUnseen = await (async () => {
@@ -3153,7 +3203,6 @@ app.post('/api/bot/ack', botAuthMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ─── Fallback manual Baixas PIX ──────────────────────────────────────────────
 app.post('/api/pix-fallback', async (req, res) => {
   const { inicio, fim } = req.body || {};
   const payload = {};

@@ -405,5 +405,18 @@ module.exports = {
       merge_logs: true,
       env: { NODE_ENV: 'production', PORT: 3035 },
     },
+    {
+      name: 'assistente-ia',
+      script: 'server.js',
+      cwd: 'E:/Projetos/AssistenteIA',
+      exec_mode: 'fork',
+      autorestart: true,
+      watch: false,
+      windowsHide: true,
+      out_file: 'E:/Projetos/AssistenteIA/logs/assistente-ia.log',
+      error_file: 'E:/Projetos/AssistenteIA/logs/assistente-ia.log',
+      merge_logs: true,
+      env: { NODE_ENV: 'production', PORT: 3041 },
+    },
   ],
 };
