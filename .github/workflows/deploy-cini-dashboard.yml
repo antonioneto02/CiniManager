@@ -1,0 +1,263 @@
+name: CI/CD - Cini Dashboard
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'dashboard/**'
+      - '.github/workflows/deploy-cini-dashboard.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'dashboard/**'
+      - '.github/workflows/deploy-cini-dashboard.yml'
+  workflow_dispatch:
+
+env:
+  APP_PORT: 9999
+  PM2_APP_NAME: cini-dashboard
+  DEPLOY_PATH: C:/Projetos/CiniManager/dashboard
+
+jobs:
+  build-and-test:
+    name: Build e Testes
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Baixar código-fonte
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: 'npm'
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Verificar sintaxe
+        run: find . -name '*.js' -not -path './node_modules/*' -print0 | xargs -0 -n1 node --check
+
+      - name: Auditoria de dependências
+        run: npx --yes audit-ci@7 --high
+
+      - name: SAST (segurança com ESLint)
+        run: npx eslint . || true
+
+      - name: Varredura de segredos
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy:
+    name: Implantar em Produção
+    needs: build-and-test
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && vars.DEPLOY_FROZEN != 'true'
+    runs-on: [self-hosted, windows, cini-prod]
+    environment: production
+    concurrency:
+      group: deploy-cini-dashboard
+      cancel-in-progress: false
+    steps:
+      - name: Aguardar lock de deploy (evita 2 deploys ao mesmo tempo na máquina)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $lockFile = "C:\actions-runner\.deploy.lock"
+          $maxAgeMinutes = 15
+          $maxWaitMinutes = 20
+          $waitedSeconds = 0
+          while (Test-Path $lockFile) {
+            $age = (Get-Date) - (Get-Item $lockFile).LastWriteTime
+            if ($age.TotalMinutes -gt $maxAgeMinutes) {
+              Write-Output "Lock parece obsoleto (mais de $maxAgeMinutes min) -- destravando."
+              Remove-Item $lockFile -Force
+              break
+            }
+            Write-Output "Outro deploy em andamento nesse servidor, aguardando... ($([math]::Round($waitedSeconds/60,1)) min esperados)"
+            Start-Sleep -Seconds 15
+            $waitedSeconds += 15
+            if ($waitedSeconds -ge ($maxWaitMinutes * 60)) {
+              throw "Timeout esperando o lock de deploy ser liberado (${maxWaitMinutes}min)."
+            }
+          }
+          "${{ github.repository }} / run ${{ github.run_id }} / $(Get-Date -Format o)" | Set-Content -Path $lockFile
+
+      - name: Atualizar diretório de trabalho
+        # git reset --hard aqui afeta o repo INTEIRO (CiniManager), nao so a
+        # pasta dashboard -- ok porque o runner so mexe nesse checkout, e o
+        # log-watcher (outro app raiz desse mesmo repo) ainda roda fora de
+        # Docker hoje, sem deploy automatizado proprio.
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location "C:/Projetos/CiniManager"
+          $prevSha = git rev-parse HEAD
+          Write-Output "Previous commit: $prevSha"
+          Add-Content -Path $env:GITHUB_ENV -Value "PREV_SHA=$prevSha"
+          git fetch origin main
+          git reset --hard origin/main
+
+      - name: Detectar se precisa reconstruir a imagem
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location "C:/Projetos/CiniManager"
+          $prevSha = $env:PREV_SHA
+          $changed = git diff --name-only $prevSha HEAD
+          Write-Output "Arquivos alterados:`n$changed"
+          $needsRebuild = $false
+          foreach ($f in $changed) {
+            if ($f -match '^dashboard/(Dockerfile|package\.json|package-lock\.json)$') {
+              $needsRebuild = $true
+              break
+            }
+          }
+          Write-Output "Precisa reconstruir imagem: $needsRebuild"
+          Add-Content -Path $env:GITHUB_ENV -Value "NEEDS_REBUILD=$needsRebuild"
+
+      - name: Verificar bind mounts do host
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location "${{ env.DEPLOY_PATH }}"
+          $config = docker compose config --format json | ConvertFrom-Json
+          $missing = @()
+          foreach ($svc in $config.services.PSObject.Properties) {
+            foreach ($vol in $svc.Value.volumes) {
+              if ($vol.type -eq 'bind' -and $vol.source -and -not (Test-Path -LiteralPath $vol.source)) {
+                $missing += $vol.source
+              }
+            }
+          }
+          if ($missing.Count -gt 0) {
+            Write-Output "Bind mount(s) inexistente(s) no host: $($missing -join ', ')"
+            throw "Deploy abortado antes de qualquer alteração: caminho de bind mount não existe no host. Corrija o caminho (ou crie a pasta) e rode o deploy de novo."
+          }
+          Write-Output "Todos os bind mounts existem no host."
+
+      - name: Build da imagem Docker
+        if: env.NEEDS_REBUILD == 'True'
+        shell: powershell
+        run: |
+          Set-Location "${{ env.DEPLOY_PATH }}"
+          docker build -t cini-dashboard:${{ github.sha }} -t cini-dashboard:latest .
+
+      - name: Implantar (docker restart, ou docker compose se precisou rebuild)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location "${{ env.DEPLOY_PATH }}"
+          $prevSha = $env:PREV_SHA
+          $needsRebuild = $env:NEEDS_REBUILD -eq "True"
+          Write-Output "Rollback target if health check fails: $prevSha"
+          Write-Output "Caminho: $(if ($needsRebuild) { 'rebuild completo' } else { 'docker restart (codigo montado ao vivo)' })"
+
+          function Recreate-Container {
+            # Roda a partir do processo do RUNNER (fora do container do
+            # dashboard), entao e seguro mesmo quando o alvo e o proprio
+            # cini-dashboard -- diferente de disparar isso de dentro do
+            # proprio processo do dashboard, que morreria no meio do passo
+            # de parar o container antes de recriar.
+            try {
+              $projectName = (Split-Path -Leaf (Get-Location)).ToLower()
+              $netName = "${projectName}_default"
+              $netLabel = docker network inspect $netName --format '{{index .Labels "com.docker.compose.network"}}' 2>$null
+              if ($LASTEXITCODE -eq 0 -and $netLabel -ne "default") {
+                Write-Output "Rede '$netName' orfa (sem label do compose) -- removendo antes do deploy."
+                docker network rm $netName 2>&1 | Out-Null
+              }
+            } catch {}
+
+            docker compose up -d --force-recreate
+          }
+
+          if ($needsRebuild) {
+            Recreate-Container
+          } else {
+            # Caminho rapido: "git reset --hard" ja atualizou o disco, que o
+            # container ve ao vivo (mount de C:\Projetos inteiro) -- so
+            # precisa reiniciar o processo. "docker restart" e uma chamada
+            # atomica no daemon (nao multi-etapa como o compose up), entao
+            # sobrevive ao proprio container caindo no meio.
+            docker restart "${{ env.PM2_APP_NAME }}"
+          }
+
+          $healthy = $false
+          for ($i = 0; $i -lt 20; $i++) {
+            $code = & curl.exe -sk -o NUL -w "%{http_code}" "https://127.0.0.1:${{ env.APP_PORT }}/health" 2>$null
+            if ($code -eq "200") { $healthy = $true; break }
+            Start-Sleep -Seconds 3
+          }
+
+          if (-not $healthy) {
+            Write-Output "Health check failed after deploy. Rolling back to $prevSha"
+            docker compose logs --tail=100
+            Set-Location "C:/Projetos/CiniManager"
+            $failedSha = git rev-parse HEAD
+            $failedBranch = "failed/$env:PM2_APP_NAME-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+            git branch $failedBranch $failedSha
+            try { git push origin $failedBranch } catch { Write-Output "Aviso: nao consegui publicar a branch de backup ($failedBranch), mas o commit continua local no runner." }
+            Write-Output "Codigo com erro preservado em '$failedBranch' (commit $failedSha) -- ajuste e rode o deploy de novo quando corrigir."
+            git reset --hard $prevSha
+            Set-Location "${{ env.DEPLOY_PATH }}"
+          if ($needsRebuild) {
+            docker build -t cini-dashboard:$prevSha -t cini-dashboard:latest .
+            Recreate-Container
+          } else {
+            docker restart "${{ env.PM2_APP_NAME }}"
+          }
+            throw "Deploy failed health check; rolled back to $prevSha"
+          }
+
+          Write-Output "Deploy successful. Now running: $(git -C 'C:/Projetos/CiniManager' rev-parse HEAD)"
+
+      - name: Notificar sucesso
+        if: success()
+        shell: powershell
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $check = [char]0x2705
+          $bt = [char]96
+          $sha = git -C "C:/Projetos/CiniManager" rev-parse --short HEAD
+          $msg = git -C "C:/Projetos/CiniManager" log -1 --pretty=%s
+          $runUrl = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          $commitUrl = "${{ github.server_url }}/${{ github.repository }}/commit/$sha"
+          $actor = "${{ github.actor }}"
+          $text = "$check *cini-dashboard* - deploy concluido com sucesso`nCommit: $bt$sha$bt - $msg`nDisparado por: $actor`n<$runUrl|Ver execucao> | <$commitUrl|Ver commit>"
+          $body = @{ text = $text } | ConvertTo-Json
+          $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($body)
+          try { Invoke-RestMethod -Uri "${{ secrets.DEPLOY_WEBHOOK_URL }}" -Method Post -Body $bodyBytes -ContentType 'application/json; charset=utf-8' } catch { Write-Output "Aviso: notificacao webhook falhou: $_" }
+
+      - name: Notificar falha
+        if: failure()
+        shell: powershell
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $cross = [char]0x274C
+          $bt = [char]96
+          $sha = git -C "C:/Projetos/CiniManager" rev-parse --short HEAD
+          $msg = git -C "C:/Projetos/CiniManager" log -1 --pretty=%s
+          $runUrl = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          $commitUrl = "${{ github.server_url }}/${{ github.repository }}/commit/$sha"
+          $actor = "${{ github.actor }}"
+          $text = "$cross *cini-dashboard* - deploy FALHOU (rollback automatico executado)`nCommit tentado: $bt$sha$bt - $msg`nDisparado por: $actor`n<$runUrl|Ver execucao (logs)> | <$commitUrl|Ver commit>"
+          $body = @{ text = $text } | ConvertTo-Json
+          $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($body)
+          try { Invoke-RestMethod -Uri "${{ secrets.DEPLOY_WEBHOOK_URL }}" -Method Post -Body $bodyBytes -ContentType 'application/json; charset=utf-8' } catch { Write-Output "Aviso: notificacao webhook falhou: $_" }
+
+      - name: Liberar lock de deploy
+        if: always()
+        shell: powershell
+        run: |
+          $lockFile = "C:\actions-runner\.deploy.lock"
+          if (Test-Path $lockFile) { Remove-Item $lockFile -Force }
