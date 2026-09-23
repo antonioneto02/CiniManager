@@ -1,0 +1,26 @@
+services:
+  cini-dashboard:
+    image: cini-dashboard:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cini-dashboard
+    restart: unless-stopped
+    ports:
+      - "9999:9999"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+    volumes:
+      # Arvore inteira do C:\Projetos, no MESMO caminho (sem remapear pra
+      # C:/app como nas outras apps): o dashboard usa caminhos absolutos
+      # C:\Projetos\... espalhados no codigo (registry de apps, certificados,
+      # git pull/logs de cada app) — precisa ver o disco do host 1:1.
+      - C:/Projetos:C:/Projetos
+      # Pipe do Docker do host, pra continuar controlando os containers
+      # das outras apps de dentro do proprio container.
+      - '\\.\pipe\docker_engine:\\.\pipe\docker_engine'
+      # CLI do Docker e do Git do host (a imagem nao instala nenhum dos dois).
+      - 'C:/Program Files/docker:C:/Program Files/docker:ro'
+      - 'C:/Program Files/Git:C:/Program Files/Git:ro'

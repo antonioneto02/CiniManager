@@ -15,16 +15,11 @@ function Write-Log($msg) {
 }
 
 function Insert-Notificacao($mensagem) {
-    # Desativado: essa fila (FATO_FILA_NOTIFICACOES) é a mesma usada para notificações
-    # de cliente (confirmação de PIX etc.) e o volume de alertas internos estava
-    # atrasando essas mensagens. Alertas internos agora só vão pro log.
     Write-Log "(notificacao desativada, so log) $mensagem"
     return $true
 }
 
 function ConvertTo-HashtableCompat($obj) {
-    # Windows PowerShell 5.1 nao tem ConvertFrom-Json -AsHashtable (so existe no 7+).
-    # Converte o PSCustomObject retornado pelo ConvertFrom-Json normal manualmente.
     $ht = @{}
     if ($obj) {
         foreach ($prop in $obj.PSObject.Properties) {
@@ -58,23 +53,18 @@ function Save-State($state) {
     $state | ConvertTo-Json | Set-Content $STATE_FILE -Encoding UTF8
 }
 
-Write-Log "Verificando status dos processos PM2..."
+Write-Log "Verificando status dos containers Docker..."
 
 try {
-    # pm2_env carrega uma copia de todas as variaveis de ambiente do processo pai,
-    # incluindo pares que so diferem em maiusculas/minusculas (ex: username/USERNAME).
-    # ConvertFrom-Json no Windows PowerShell 5.1 nao aceita isso (chaves colidem, sao
-    # case-insensitive). Por isso extraimos so os campos que interessam via node antes
-    # de converter para objeto do PowerShell.
-    $slimJson  = pm2 jlist 2>$null | node "$PSScriptRoot\pm2-jlist-slim.js"
+    $slimJson  = node "$PSScriptRoot\docker-jlist.js" 2>$null
     $processes = $slimJson | ConvertFrom-Json
 } catch {
-    Write-Log "ERRO ao consultar PM2: $_"
+    Write-Log "ERRO ao consultar Docker: $_"
     exit 1
 }
 
 if (-not $processes -or $processes.Count -eq 0) {
-    Write-Log "Nenhum processo PM2 ativo."
+    Write-Log "Nenhum container Docker ativo."
     exit 0
 }
 
@@ -83,7 +73,7 @@ $state   = Load-State
 $now     = Get-Date
 $changed = $false
 $stateChanged = $false
-$appProcesses = $processes | Where-Object { $_.name -notlike "pm2-*" -and $_.name -ne "log-watcher" -and $_.name -ne "cini-dashboard" }
+$appProcesses = $processes
 
 foreach ($proc in $appProcesses) {
     $name   = $proc.name
@@ -95,7 +85,7 @@ foreach ($proc in $appProcesses) {
         $jaAvisado = $alerts.ContainsKey($name)
         if (-not $jaAvisado) {
             $ts  = Get-Date -Format "dd/MM/yyyy HH:mm"
-            $msg = "🚨 *PROCESSO CAÍDO*`nApp: *$name*`nStatus: *$status*`nHorário: $ts`n`nVer log: pm2 logs $name --lines 30"
+            $msg = "🚨 *PROCESSO CAÍDO*`nApp: *$name*`nStatus: *$status*`nHorário: $ts`n`nVer log: docker logs $name --tail 30"
             Write-Log "Enviando alerta: $name está $status"
             if (Insert-Notificacao $msg) {
                 $alerts[$name] = $now.ToString("o")

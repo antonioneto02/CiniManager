@@ -195,6 +195,7 @@ mark.log-hl{background:#d29922;color:#000;border-radius:2px;padding:0 2px;font-s
     </div>
     <div class="subbar-right">
       <button class="btn btn-sm btn-blue" onclick="openAutoPoll()" id="btn-autopoll">🔄 Auto-deploy</button>
+      <button class="btn btn-sm" onclick="openActionsRuns()">⚙️ Actions</button>
       <button class="btn btn-sm btn-yellow" onclick="openRestartResetModal()">🧹 Limpar restarts</button>
       <button class="btn btn-sm" id="btn-db-target" onclick="openDbTarget()">🗄️ Banco: …</button>
       <button class="btn btn-sm btn-orange" onclick="doDeployAll()">🚀 Deploy All</button>
@@ -280,6 +281,16 @@ mark.log-hl{background:#d29922;color:#000;border-radius:2px;padding:0 2px;font-s
     </div>
     <div class="modal-body" id="autopoll-body"><span class="spin"></span> Carregando...</div>
     <div class="modal-footer" id="autopoll-footer"></div>
+  </div>
+</div>
+
+<div class="modal-bg" id="actions-runs-modal">
+  <div class="modal" style="width:900px;max-width:95vw;max-height:85vh">
+    <div class="modal-head">
+      <span class="modal-head-title">⚙️ Execuções recentes no GitHub Actions</span>
+      <button class="btn btn-sm" onclick="closeActionsRuns()">✕</button>
+    </div>
+    <div class="modal-body" id="actions-runs-body"><span class="spin"></span> Carregando...</div>
   </div>
 </div>
 
@@ -722,6 +733,7 @@ function renderGrid() {
       <div class="card-header">
         ${dotEl}
         <span class="card-name">${esc(displayName(a.name))}</span>
+        ${a.isDocker ? '<span title="Roda em container Docker" style="opacity:.8">🐳</span>' : ''}
         <span class="drag-handle" title="Arraste para mover">⋮⋮</span>
         ${errorBadge}
         <span class="card-pid">${a.status==='online' ? (a.port ? `:${a.port}` : `pid:${a.pid}`) : a.status}</span>
@@ -1793,6 +1805,57 @@ function closeAutoPoll() {
   stopAutoPollRefresh();
 }
 document.getElementById('autopoll-modal').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeAutoPoll(); });
+
+let actionsRunsRefreshTimer = null;
+const RUN_STATUS_ICON = { queued: '⏳', in_progress: '🔵', completed: '' };
+const RUN_CONCLUSION_ICON = { success: '✅', failure: '🔴', cancelled: '⚪', skipped: '⚪', timed_out: '🔴' };
+
+function renderActionsRuns(runs) {
+  const el = document.getElementById('actions-runs-body');
+  if (!runs.length) { el.innerHTML = '<div class="empty">Nenhuma execução recente.</div>'; return; }
+  el.innerHTML = `<table class="log-table" style="width:100%">
+    <thead><tr><th>App</th><th>Status</th><th>Branch</th><th>Disparado por</th><th>Quando</th><th></th></tr></thead>
+    <tbody>${runs.map(r => {
+      const icon = r.status === 'completed' ? (RUN_CONCLUSION_ICON[r.conclusion] || '⚪') : (RUN_STATUS_ICON[r.status] || '⏳');
+      const label = r.status === 'completed' ? (r.conclusion || 'completed') : r.status;
+      return `<tr>
+        <td>${esc(displayName(r.app || r.repo))}</td>
+        <td>${icon} ${esc(label)}</td>
+        <td>${esc(r.branch || '')}</td>
+        <td>${esc(r.actor || '')}</td>
+        <td>${esc(r.createdAgo || '')}</td>
+        <td><a href="${esc(r.url)}" target="_blank" rel="noopener">Ver ↗</a></td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+}
+
+async function openActionsRuns() {
+  document.getElementById('actions-runs-body').innerHTML = '<span class="spin"></span> Carregando...';
+  document.getElementById('actions-runs-modal').classList.add('open');
+  try {
+    const runs = await api('GET', '/api/actions/runs');
+    renderActionsRuns(runs);
+    startActionsRunsRefresh();
+  } catch (e) {
+    document.getElementById('actions-runs-body').innerHTML = `<span style="color:var(--red)">Erro: ${esc(e.message)}</span>`;
+  }
+}
+
+function startActionsRunsRefresh() {
+  if (actionsRunsRefreshTimer) return;
+  actionsRunsRefreshTimer = setInterval(async () => {
+    const modal = document.getElementById('actions-runs-modal');
+    if (!modal.classList.contains('open')) { clearInterval(actionsRunsRefreshTimer); actionsRunsRefreshTimer = null; return; }
+    try { renderActionsRuns(await api('GET', '/api/actions/runs')); } catch {}
+  }, 8000);
+}
+
+function closeActionsRuns() {
+  document.getElementById('actions-runs-modal').classList.remove('open');
+  if (actionsRunsRefreshTimer) { clearInterval(actionsRunsRefreshTimer); actionsRunsRefreshTimer = null; }
+}
+document.getElementById('actions-runs-modal').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeActionsRuns(); });
 function renderDeployHistory(hist) {
   const el = document.getElementById('history');
   if (!hist.length) { el.innerHTML='<div class="empty">Nenhum deploy ainda.</div>'; return; }

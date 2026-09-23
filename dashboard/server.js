@@ -1,7 +1,7 @@
 'use strict';
 require('dotenv').config();
 const express       = require('express');
-const pm2           = require('pm2');
+const dockerController = require('./docker-controller');
 const path          = require('path');
 const fs            = require('fs');
 const https         = require('https');
@@ -13,8 +13,8 @@ const crypto        = require('crypto');
 const sql           = require('mssql');
 const app  = express();
 const PORT = parseInt(process.env.DASHBOARD_PORT) || 9999;
-
 const PROTHEUS_AUTH_URL = process.env.PROTHEUS_AUTH_URL || 'https://consultas.cini.com.br:3032';
+const GOOGLE_CHAT_STATUS_WEBHOOK_URL = process.env.GOOGLE_CHAT_STATUS_WEBHOOK_URL || '';
 const CERT_DIR = 'C:\\Projetos\\Certificados';
 const sslOptions = {
   key: fs.readFileSync(path.join(CERT_DIR, 'cini.key')),
@@ -37,6 +37,7 @@ app.use(session({
   cookie: { maxAge: 8 * 60 * 60 * 1000 },
 }));
 app.get('/Cini.png', (req, res) => res.sendFile(path.join(__dirname, 'Cini.png')));
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
 function normalizeUserId(v) {
   return String(v || '').trim().padStart(6, '0');
@@ -270,53 +271,12 @@ app.use((req, res, next) => {
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-const APP_REGISTRY = {
-  'contagem-produtos': 'E:/Projetos/ContagemProdutos',
-  'api-weduu':       'C:/Projetos/API_Weduu',
-  'erp-cini':        'E:/Projetos/Gestao_Portaria/erp_cini',
-  'wf-cini':         'E:/Projetos/WF_Cini/wf_cini',
-  'central-tarefas': 'E:/Projetos/Central_Tarefas',
-  'hub-cini':        'E:/Projetos/Hub_Cini',
-  'cini-pricing':    'E:/Projetos/Cini-Pricing',
-  'api-sicredi':     'E:/Projetos/API_Sicredi',
-  'notificador-pix': 'C:/Projetos/Confirmacao_Pix/NotificadorPIX',
-  'log-watcher':     'E:/Projetos/CiniManager',
-  'cini-dashboard':  'E:/Projetos/CiniManager/dashboard',
-  'whatsapp-bot':         'E:/Projetos/Central-Notificacoes/whatsapp-bot',
-  'webhook-whatsapp':     'C:/Projetos/WebhookWhatsAppNode',
-  'client-baixas-pix':    'C:/Projetos/ClientBaixasPIX',
-  'portal-consultas':     'C:/Projetos/PortalConsultasCini',
-  'portal-streamlit':     'C:/Projetos/PortalConsultasStreamlit',
-  'gerenciador-cargas':   'C:/Projetos/gerenciador-cargas',
-  'whatsapp-motoristas':  'E:/Projetos/Central-Notificacoes/WhatsAppMotoristas',
-  'whatsapp-pix-motoristas': 'E:/Projetos/Central-Notificacoes/WhatsAppPixMotoristas',
-  'whatsapp-webnode':     'E:/Projetos/Central-Notificacoes/WhatsAppWebNode',
-  'central-notificacoes': 'E:/Projetos/Central-Notificacoes/CentralNotificacoes',
-  'portal-vagas-rh':      'E:/Projetos/PortalVagasRH',
-  'portal-api':           'E:/Projetos/portalApi',
-  'portal-ete':           'E:/Projetos/portalETE',
-  'cini-tracking':        'E:/Projetos/AppTracking',
-  'coleta-sac':           'C:/Projetos/coleta-SAC',
-  'lp-negocios':          'E:/Projetos/LP-Negocios',
-  'cini-leads':           'E:/Projetos/Cini-Leads',
-  'portal-intranet':      'E:/Projetos/PortalIntranetCini',
-  'portal-rnc':           'E:/Projetos/PortalRNC',
-  'portal-acoes':         'E:/Projetos/PortalAcoes',
-  'portal-resultados':    'E:/Projetos/PortalResultados',
-  'kanban-entregas':      'E:/Projetos/KanbanEntregas',
-  'gestao-importacao-pedidos': 'E:/Projetos/GestaoImportacaoPedidos',
-  'portal-televendas':    'E:/Projetos/PortalTelevendas',
-  'protheus-auth':        'E:/Projetos/ProtheusAuth',
-  'portal-marketing':     'E:/Projetos/PortalMarketing',
-  'contagem-armazens':    'E:/Projetos/ContagemArmazens',
-  'solicitacao-fachada':  'E:/Projetos/SolicitacaoFachada',
-  'assistente-ia':        'E:/Projetos/AssistenteIA',
-};
+const { APP_REGISTRY, CONTAINER_NAME_OVERRIDES } = require('./app-registry');
 
 const DEPLOY_EXCLUDE    = new Set(['log-watcher']);
 const STAGED_DEPLOY_APPS = new Set(['cini-dashboard']);
 const NOTIFY_EXCLUDE = new Set(['log-watcher']);
-const HTTPS_APPS = new Set(['whatsapp-webnode', 'webhook-whatsapp', 'whatsapp-motoristas', 'whatsapp-pix-motoristas', 'portal-consultas', 'portal-vagas-rh', 'cini-tracking', 'coleta-sac', 'portal-intranet', 'portal-rnc', 'portal-acoes', 'portal-resultados', 'contagem-armazens', 'solicitacao-fachada', 'contagem-produtos', 'erp-cini', 'wf-cini', 'central-tarefas', 'hub-cini', 'cini-pricing', 'notificador-pix', 'whatsapp-bot', 'portal-api', 'portal-ete', 'cini-leads', 'kanban-entregas', 'gestao-importacao-pedidos', 'portal-televendas', 'protheus-auth', 'portal-marketing', 'cini-dashboard']);
+const HTTPS_APPS = new Set(['whatsapp-webnode', 'whatsapp-motoristas', 'whatsapp-pix-motoristas', 'portal-consultas', 'portal-vagas-rh', 'cini-tracking', 'coleta-sac', 'portal-intranet', 'portal-rnc', 'portal-acoes', 'portal-resultados', 'contagem-armazens', 'solicitacao-fachada', 'contagem-produtos', 'erp-cini', 'wf-cini', 'central-tarefas', 'hub-cini', 'cini-pricing', 'notificador-pix', 'whatsapp-bot', 'portal-api', 'portal-ete', 'cini-leads', 'kanban-entregas', 'gestao-importacao-pedidos', 'portal-televendas', 'protheus-auth', 'portal-marketing', 'cini-dashboard']);
 const AUTOPOLL_FILE = path.join(__dirname, '.autopoll.json');
 const CARD_ORDER_FILE = path.join(__dirname, '.card-order.json');
 const DISPLAY_NAMES = {
@@ -339,7 +299,6 @@ const DISPLAY_NAMES = {
   'whatsapp-motoristas': 'Tracking',
   'whatsapp-pix-motoristas': 'Whatsapp Pix Chapa',
   'whatsapp-webnode': 'Cini Notifica BOT',
-  'webhook-whatsapp': 'Cini Notifica e WB Sicredi',
   'portal-vagas-rh':    'Portal Vagas RH',
   'portal-api':         'Portal API (Backend)',
   'portal-ete':         'Portal ETE',
@@ -649,6 +608,34 @@ async function sendWhatsApp(msg) {
   }
 }
 
+async function sendGoogleChat(text) {
+  if (!GOOGLE_CHAT_STATUS_WEBHOOK_URL) return;
+  try {
+    await axios.post(GOOGLE_CHAT_STATUS_WEBHOOK_URL, { text }, { timeout: 8000 });
+  } catch (e) {
+    console.error('[google-chat] Falha:', e.message);
+  }
+}
+
+const appStatusNotifyThrottle = new Map();
+const APP_STATUS_DUP_WINDOW_MS = 60 * 1000;
+
+async function notifyAppStatus(appName, isUp, detail) {
+  const signature = `${appName}:${isUp ? 'up' : 'down'}`;
+  const last = appStatusNotifyThrottle.get(signature) || 0;
+  if (Date.now() - last < APP_STATUS_DUP_WINDOW_MS) return;
+  appStatusNotifyThrottle.set(signature, Date.now());
+
+  const icon = isUp ? '🟢' : '🔴';
+  const label = isUp ? 'subiu' : 'caiu';
+  const lines = [
+    `${icon} *${appLabel(appName)}* ${label}`,
+    `📅 ${now()}`,
+  ];
+  if (detail) lines.push(detail);
+  await sendGoogleChat(lines.join('\n'));
+}
+
 function trimText(text, max = 500) {
   const clean = String(text || '').replace(/\s+/g, ' ').trim();
   return clean.length > max ? clean.slice(0, max - 1) + '…' : clean;
@@ -695,13 +682,12 @@ const gitAlertThrottle = new Map();
 const recentNotifications = new Map();
 const NOTIFY_DUP_WINDOW_MS = 5 * 60 * 1000; 
 const APP_ERROR_DUP_WINDOW_MS = 5 * 60 * 1000; 
-const GIT_ALERT_DUP_WINDOW_MS = 4 * 60 * 60 * 1000;  // 4h — erros persistentes (auth/rede) não spamam
+const GIT_ALERT_DUP_WINDOW_MS = 4 * 60 * 60 * 1000;  
 const PM2_EVENT_DUP_WINDOW_MS = 5 * 60 * 1000;
 const deployNotifyThrottle = new Map();
-const DEPLOY_FAIL_DUP_WINDOW_MS = 60 * 60 * 1000;   // 1h — mesma falha de deploy não repete
-const UPDATE_DETECTED_DUP_WINDOW_MS = 60 * 60 * 1000; // 1h — mesmo commit remoto não repete "atualização detectada"
+const DEPLOY_FAIL_DUP_WINDOW_MS = 60 * 60 * 1000;  
+const UPDATE_DETECTED_DUP_WINDOW_MS = 60 * 60 * 1000; 
 const ALERT_VISIBLE_MS = 6 * 60 * 60 * 1000;
-
 const whatsappStuckRestartThrottle = new Map();
 const WHATSAPP_STUCK_COOLDOWN_MS = 15 * 60 * 1000;
 const WHATSAPP_STUCK_AGE_MINUTES = 3;
@@ -1101,45 +1087,25 @@ function getLatestErrorFromBuffer(appName) {
   return null;
 }
 
-let _pm2Connected = null;
-function ensurePm2() {
-  if (_pm2Connected) return _pm2Connected;
-  _pm2Connected = new Promise((resolve, reject) => {
-    pm2.connect(false, (err) => {
-      if (err) { _pm2Connected = null; return reject(err); }
-      resolve();
-    });
-  });
-  return _pm2Connected;
-}
-
-function startBus() {
-  ensurePm2().then(() => {
-    pm2.launchBus((err, bus) => {
-      if (err) { setTimeout(startBus, 5000); return; }
-      console.log('[dashboard] PM2 bus ativo.');
-      bus.on('log:out', pkt => {
-        const name = pkt.process?.name;
-        const text = (pkt.data || '').trim();
-        if (name && text) bufferLog(name, 'stdout', text);
-      });
-      bus.on('log:err', pkt => {
-        const name = pkt.process?.name;
-        const text = (pkt.data || '').trim();
-        if (name && text) bufferLog(name, 'stderr', text);
-      });
-      bus.on('process:event', pkt => {
-        const name  = pkt.process?.name;
-        const event = pkt.event;
-        if (!name) return;
-        bufferLog(name, 'pm2', `evento PM2: ${event}`);
-        notifyPm2EventError(name, event).catch(() => {});
-      });
-      bus.on('error', () => { _pm2Connected = null; setTimeout(startBus, 5000); });
-    });
-  }).catch(() => setTimeout(startBus, 5000));
-}
-startBus();
+dockerController.onCriticalEvent((name, event) => {
+  bufferLog(name, 'pm2', `evento: ${event}`);
+  notifyPm2EventError(name, event).catch(() => {});
+});
+dockerController.onEvent((name, action, evt) => {
+  if (action === 'start') {
+    notifyAppStatus(name, true).catch(() => {});
+  } else if (action === 'die') {
+    const exitCode = evt?.Actor?.Attributes?.exitCode;
+    const detail = exitCode && exitCode !== '0' ? `⚠️ Código de saída: ${exitCode}` : '';
+    notifyAppStatus(name, false, detail).catch(() => {});
+  }
+});
+dockerController.init({
+  appRegistry: APP_REGISTRY,
+  containerOverrides: CONTAINER_NAME_OVERRIDES,
+  stateDir: __dirname,
+  onLog: (name, source, text) => bufferLog(name, source, text),
+});
 setInterval(() => {
   try { pushErrorHistory(); } catch (e) { console.error('[poll-errors-db] erro:', e.message); }
 }, 30000);
@@ -1154,84 +1120,20 @@ setInterval(() => {
   for (const [k, v] of deployNotifyThrottle) if (v < deployCutoff) deployNotifyThrottle.delete(k);
 }, 15 * 60 * 1000);
 
-// Descobre o PID que está ouvindo (LISTENING) em uma porta TCP, via netstat.
-function pidNaPorta(port) {
-  return new Promise((resolve) => {
-    if (!port) return resolve(null);
-    execFile('netstat', ['-ano'], { windowsHide: true }, (err, stdout) => {
-      if (err || !stdout) return resolve(null);
-      const linha = stdout.split('\n').find((l) => {
-        const t = l.trim();
-        return t.includes(`:${port} `) && /LISTENING/i.test(t);
-      });
-      if (!linha) return resolve(null);
-      const partes = linha.trim().split(/\s+/);
-      const pid = parseInt(partes[partes.length - 1], 10);
-      resolve(Number.isFinite(pid) && pid > 0 ? pid : null);
-    });
-  });
-}
-
-function matarPid(pid) {
-  return new Promise((resolve) => {
-    execFile('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true }, () => resolve());
-  });
-}
-
-async function aguardarPortaLivre(port, tentativas, intervaloMs) {
-  for (let i = 0; i < tentativas; i++) {
-    const pid = await pidNaPorta(port);
-    if (!pid) return true;
-    await new Promise((r) => setTimeout(r, intervaloMs));
-  }
-  return false;
-}
-
-async function garantirPortaLivre(name) {
-  let porta;
-  try {
-    const lista = await pm2List();
-    const proc = lista.find((p) => p.name === name);
-    const env = proc?.pm2_env?.env || {};
-    porta = Number(env.PORT || env.port) || null;
-  } catch {
-    porta = null;
-  }
-  if (!porta) porta = readAppPort(name); 
-  if (!porta) return; 
-
-  const livre = await aguardarPortaLivre(porta, 6, 500);
-  if (livre) return;
-
-  const pid = await pidNaPorta(porta);
-  if (pid) {
-    console.warn(`[pm2Do] Porta ${porta} de "${name}" ainda ocupada pelo PID ${pid} — encerrando processo zumbi antes de continuar.`);
-    await matarPid(pid);
-    await aguardarPortaLivre(porta, 4, 300);
-  }
-}
-
-function pm2DoRaw(action, target) {
-  return ensurePm2().then(() => new Promise((resolve, reject) => {
-    pm2[action](target, (err) => {
-      if (err) return reject(err);
-      resolve();
-    });
-  }));
-}
-
 async function pm2Do(action, target) {
-  if (action === 'stop' || action === 'restart') {
-    await pm2DoRaw('stop', target);
-    await garantirPortaLivre(target);
-    if (action === 'stop') return;
-  }
-  if (action === 'start' || action === 'restart') {
-    await garantirPortaLivre(target);
-    await pm2DoRaw('start', target);
+  if (target !== 'all' && ['start', 'restart'].includes(action) && APP_GITHUB_WORKFLOW[target]) {
+    const log = (src, txt) => { bufferLog(target, src, txt); console.log(`[deploy:${target}] ${txt}`); };
+    await commitAndPushIfNeeded(target, log);
+    await triggerGithubActionsRun(target, log);
     return;
   }
-  return pm2DoRaw(action, target);
+  if (target !== 'all' && !dockerController.isManaged(target)) {
+    if (action === 'restart') {
+      return pm2Reload(target, () => {});
+    }
+    throw new Error(`App "${target}" não roda em Docker — só a ação "restart" é suportada por aqui (start/stop precisam ser feitos direto no PM2).`);
+  }
+  return dockerController.doAction(action, target);
 }
 
 
@@ -1330,34 +1232,43 @@ function rodarLimpezaDeLogsAntigos() {
   }
 }
 
-// Primeira varredura pouco depois do boot do dashboard, depois 1x por dia.
 setTimeout(() => { try { rodarLimpezaDeLogsAntigos(); } catch (e) { console.error('[log-cleanup] erro:', e.message); } }, 60_000);
 setInterval(() => { try { rodarLimpezaDeLogsAntigos(); } catch (e) { console.error('[log-cleanup] erro:', e.message); } }, 24 * 60 * 60 * 1000);
 
-async function pm2Reload(appName, log, retries = 5, delayMs = 2000) {
-  for (let i = 0; i < retries; i++) {
-    try {
-      await pm2Do('reload', appName);
-      return;
-    } catch (err) {
-      const msg = (err.message || err.msg || String(err)).toLowerCase();
-      if (msg.includes('reload in progress') && i < retries - 1) {
-        log('deploy', `⏳ PM2 reload em andamento, aguardando ${delayMs / 1000}s... (tentativa ${i + 1}/${retries})`);
-        await new Promise(r => setTimeout(r, delayMs));
-      } else {
-        throw err;
-      }
-    }
+async function pm2Reload(appName, log) {
+  if (dockerController.isManaged(appName)) {
+    return dockerController.doAction('restart', appName);
   }
+  log('deploy', '🔁 Encerrando processo — o Serviço do Windows deve subir uma nova instância em instantes...');
+  setTimeout(() => process.exit(0), 4000);
 }
 
 function pm2List() {
-  return ensurePm2().then(() => new Promise((resolve, reject) => {
-    pm2.list((err, list) => {
-      if (err) return reject(err);
-      resolve(list);
+  const list = dockerController.list();
+  if (!dockerController.isManaged('cini-dashboard')) {
+    const selfUptimeMs = process.uptime() * 1000;
+    list.push({
+      pm_id: 'cini-dashboard',
+      name: 'cini-dashboard',
+      pid: process.pid,
+      pm2_env: {
+        status: 'online',
+        restart_time: 0,
+        pm_uptime: Date.now() - selfUptimeMs,
+      },
+      monit: { cpu: 0, memory: process.memoryUsage().rss },
     });
-  }));
+  }
+  if (!dockerController.isManaged('log-watcher')) {
+    list.push({
+      pm_id: 'log-watcher',
+      name: 'log-watcher',
+      pid: 0,
+      pm2_env: { status: 'stopped', restart_time: 0, pm_uptime: 0 },
+      monit: { cpu: 0, memory: 0 },
+    });
+  }
+  return Promise.resolve(list);
 }
 
 function inferLogSource(filePath) {
@@ -1446,28 +1357,9 @@ async function pm2Info(name) {
   } catch { return null; }
 }
 
-function readPm2ErrorLog(name, lines = 8) {
-  try {
-    const pm2Home = process.env.PM2_HOME || path.join(process.env.USERPROFILE || 'C:/Users/nerias.sousa', '.pm2');
-    let errFile = path.join(pm2Home, 'logs', `${name}-error.log`);
-    if (!fs.existsSync(errFile)) {
-      const dir = path.join(pm2Home, 'logs');
-      const files = fs.readdirSync(dir).filter(f => f.startsWith(name + '-error'));
-      if (!files.length) return '';
-      errFile = path.join(dir, files[0]);
-    }
-    const stat = fs.statSync(errFile);
-    const TAIL = 4096;
-    const start = Math.max(0, stat.size - TAIL);
-    const fd = fs.openSync(errFile, 'r');
-    const buf = Buffer.alloc(Math.min(stat.size, TAIL));
-    fs.readSync(fd, buf, 0, buf.length, start);
-    fs.closeSync(fd);
-    let text = buf.toString('utf8');
-    if (start > 0) text = text.substring(text.indexOf('\n') + 1);
-    const allLines = text.split('\n').filter(Boolean);
-    return allLines.slice(-lines).join('\n');
-  } catch { return ''; }
+async function readPm2ErrorLog(name, lines = 8) {
+  if (!dockerController.isManaged(name)) return '';
+  return dockerController.recentLog(name, lines);
 }
 
 async function waitOnline(name, maxMs = 25000) {
@@ -1566,14 +1458,146 @@ const GIT_ENV = {
   GIT_HTTP_LOW_SPEED_TIME: '20',
 };
 
-// Git fetch só funciona sem interação se GITHUB_TOKEN estiver configurado.
-// Sem o token, erros de autenticação são esperados e não devem gerar alertas.
 const GIT_AUTH_CONFIGURED = !!(
   process.env.GITHUB_TOKEN ||
   Object.keys(process.env).some(k => k.startsWith('GITHUB_TOKEN_'))
 );
 if (!GIT_AUTH_CONFIGURED) {
   console.warn('[git] GITHUB_TOKEN não configurado — polling de updates Git desativado. Adicione GITHUB_TOKEN ao .env para habilitar.');
+}
+
+// Mapa app -> workflow do GitHub Actions que faz build+testes+deploy dela.
+// Start/restart passam a disparar esse workflow em vez de agir direto no
+// Docker, pra rodar a suite de testes/lint/segurança do CI antes de subir.
+const GITHUB_OWNER = 'antonioneto02';
+const APP_GITHUB_WORKFLOW = {
+  'contagem-produtos':        { repo: 'ContagemProdutos',        file: 'deploy.yml' },
+  'api-weduu':                { repo: 'API_Weduu',               file: 'deploy.yml' },
+  'erp-cini':                 { repo: 'Gestao_Portaria',         file: 'deploy-erp-cini.yml' },
+  'wf-cini':                  { repo: 'WF_Cini',                 file: 'deploy.yml' },
+  'central-tarefas':          { repo: 'Central_Tarefas',         file: 'deploy.yml' },
+  'hub-cini':                 { repo: 'Hub_Cini',                file: 'deploy.yml' },
+  'cini-pricing':             { repo: 'Cini-Pricing',            file: 'deploy.yml' },
+  'api-sicredi':               { repo: 'ApiSicredi',              file: 'deploy.yml' },
+  'notificador-pix':          { repo: 'Confirmacao_Pix',         file: 'deploy-notificador-pix.yml' },
+  'cini-dashboard':           { repo: 'CiniManager',             file: 'deploy-cini-dashboard.yml' },
+  'whatsapp-bot':             { repo: 'Central-Notificacoes',    file: 'deploy-whatsapp-bot.yml' },
+  'client-baixas-pix':        { repo: 'ClientBaixasPIX',         file: 'deploy.yml' },
+  'portal-consultas':         { repo: 'PortalConsultasCini',     file: 'deploy.yml' },
+  'portal-streamlit':         { repo: 'PortalConsultasStreamlit', file: 'deploy.yml' },
+  'gerenciador-cargas':       { repo: 'gerenciador-cargas',      file: 'deploy.yml' },
+  'whatsapp-motoristas':      { repo: 'Central-Notificacoes',    file: 'deploy-whatsapp-motoristas.yml' },
+  'whatsapp-pix-motoristas':  { repo: 'Central-Notificacoes',    file: 'deploy-whatsapp-pix-motoristas.yml' },
+  'whatsapp-webnode':         { repo: 'Central-Notificacoes',    file: 'deploy-whatsapp-webnode.yml' },
+  'central-notificacoes':     { repo: 'Central-Notificacoes',    file: 'deploy-central-notificacoes.yml' },
+  'portal-vagas-rh':          { repo: 'PortalVagasRH',           file: 'deploy.yml' },
+  'portal-api':               { repo: 'portalApi',               file: 'deploy.yml' },
+  'portal-ete':               { repo: 'portalETE',               file: 'deploy.yml' },
+  'cini-tracking':            { repo: 'AppTracking',             file: 'deploy.yml' },
+  'coleta-sac':                { repo: 'coleta-SAC',              file: 'deploy.yml' },
+  'lp-negocios':               { repo: 'LP-Negocios',             file: 'deploy.yml' },
+  'cini-leads':                { repo: 'Cini-Leads',              file: 'deploy.yml' },
+  'portal-intranet':          { repo: 'PortalIntranetCini',      file: 'deploy.yml' },
+  'portal-rnc':                { repo: 'PortalRNC',               file: 'deploy.yml' },
+  'portal-acoes':              { repo: 'PortalAcoes',             file: 'deploy.yml' },
+  'portal-resultados':        { repo: 'PortalResultados',        file: 'deploy.yml' },
+  'kanban-entregas':          { repo: 'KanbanEntregas',          file: 'deploy.yml' },
+  'gestao-importacao-pedidos': { repo: 'GestaoImportacaoPedidos', file: 'deploy.yml' },
+  'portal-televendas':        { repo: 'PortalTelevendas',        file: 'deploy.yml' },
+  'protheus-auth':            { repo: 'ProtheusAuth',            file: 'deploy.yml' },
+  'portal-marketing':         { repo: 'CiniBomGourmet',          file: 'deploy.yml' },
+  'contagem-armazens':        { repo: 'ContagemArmazens',        file: 'deploy.yml' },
+  'solicitacao-fachada':      { repo: 'SolicitacaoFachada',      file: 'deploy.yml' },
+  'assistente-ia':            { repo: 'AssistenteIA',            file: 'deploy.yml' },
+};
+
+function generateVersionId() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+
+async function commitAndPushIfNeeded(appName, log) {
+  const cwd = APP_REGISTRY[appName];
+  const gitRoot = findGitRoot(cwd);
+  if (!gitRoot) return;
+
+  const localChanges = getLocalChanges(gitRoot);
+  if (localChanges.length > 0) {
+    const versionId = generateVersionId();
+    log('deploy', `📝 ${localChanges.length} alteração(ões) local(is) não commitada(s) — commitando como v${versionId}...`);
+    const addOut = git('add .', gitRoot);
+    if (addOut === null) throw new Error('git add falhou');
+    const commitMsg = `deploy(${appName}): alterações do servidor — ${now()} [v${versionId}]`;
+    try {
+      execSync(`git -c user.name="CINI Manager" -c user.email="deploy@cini.com.br" commit -m "${commitMsg}"`,
+        { cwd: gitRoot, encoding: 'utf8', timeout: 15000 });
+    } catch (e) { throw new Error('git commit falhou: ' + e.message.split('\n')[0]); }
+    try {
+      execSync(`git tag "deploy-${appName}-${versionId}"`, { cwd: gitRoot, encoding: 'utf8', timeout: 10000 });
+    } catch {}
+  }
+
+  const unpushed = getUnpushedCommits(gitRoot);
+  if (unpushed.length > 0) {
+    log('deploy', `📤 ${unpushed.length} commit(s) não publicado(s) — publicando (git push)...`);
+    try {
+      execSync('git push --follow-tags', { cwd: gitRoot, encoding: 'utf8', timeout: 30000 });
+    } catch (e) { throw new Error('git push falhou: ' + e.message.split('\n')[0]); }
+  }
+}
+
+async function triggerGithubActionsRun(appName, log) {
+  const wf = APP_GITHUB_WORKFLOW[appName];
+  log = log || ((src, txt) => { bufferLog(appName, src, txt); console.log(`[gh-actions:${appName}] ${txt}`); });
+  const { repo, file } = wf;
+  const base = `https://api.github.com/repos/${GITHUB_OWNER}/${repo}`;
+  const headers = { Authorization: `token ${process.env.GITHUB_TOKEN}`, Accept: 'application/vnd.github+json' };
+
+  try {
+    const dispatchedAt = Date.now();
+    log('deploy', `🚀 Disparando ${file} no GitHub Actions...`);
+    await axios.post(`${base}/actions/workflows/${file}/dispatches`, { ref: 'main' }, { headers, timeout: 10000 });
+
+    let run = null;
+    const findDeadline = Date.now() + 30000;
+    while (Date.now() < findDeadline && !run) {
+      await new Promise(r => setTimeout(r, 3000));
+      const { data } = await axios.get(`${base}/actions/runs`, {
+        headers, timeout: 10000, params: { event: 'workflow_dispatch', per_page: 5 },
+      });
+      run = (data.workflow_runs || []).find(r =>
+        r.path.endsWith('/' + file) && new Date(r.created_at).getTime() >= dispatchedAt - 15000
+      );
+    }
+    if (!run) throw new Error('Não encontrei a execução no GitHub Actions após disparar (timeout de 30s).');
+    log('deploy', `🔗 Acompanhando: ${run.html_url}`);
+
+    const deadline = Date.now() + 10 * 60 * 1000;
+    let lastStatus = '';
+    while (Date.now() < deadline) {
+      const { data: r2 } = await axios.get(run.url, { headers, timeout: 10000 });
+      if (r2.status !== lastStatus) { log('deploy', `⏳ Status: ${r2.status}`); lastStatus = r2.status; }
+      if (r2.status === 'completed') {
+        if (r2.conclusion === 'success') {
+          log('deploy', '✅ Workflow concluído com sucesso.');
+          return { ok: true, url: r2.html_url };
+        }
+        throw new Error(`Workflow terminou com "${r2.conclusion}". Ver ${r2.html_url}`);
+      }
+      await new Promise(r => setTimeout(r, 5000));
+    }
+    throw new Error(`Timeout esperando o workflow terminar (10min). Ver ${run.html_url}`);
+  } catch (e) {
+    log('deploy', `❌ ${e.message}`);
+    await sendGoogleChat(
+      `🔴 *${appLabel(appName)}* — deploy via GitHub Actions FALHOU\n` +
+      `📅 ${now()}\n` +
+      `⚠️ ${e.message}\n` +
+      `ℹ️ A versão anterior continua no ar (rollback automático do workflow); o código com erro foi preservado no Git pra ajuste — não foi perdido.`
+    );
+    throw e;
+  }
 }
 
 function git(args, cwd) {
@@ -1646,11 +1670,9 @@ async function fixRemoteUrls() {
       const url = execFileSync('git', ['remote', 'get-url', 'origin'], {
         cwd: gitRoot, encoding: 'utf8', timeout: 5000, windowsHide: true,
       }).trim();
-      // Match URLs with or without existing username/token
       const m = url.match(/^https:\/\/(?:[^@]+@)?github\.com\/([^\/]+)\//);
       if (!m) continue;
       const owner = m[1];
-      // PAT lookup: GITHUB_TOKEN_<OWNER_MAIUSCULO> ou GITHUB_TOKEN genérico
       const token = process.env[`GITHUB_TOKEN_${owner.toUpperCase()}`] || process.env.GITHUB_TOKEN;
       let newUrl;
       if (token) {
@@ -1768,6 +1790,23 @@ function getUnpushedCommits(cwd) {
   }) : [];
 }
 
+function requirementsTxtChanged(gitRoot, pathFilter, before, after) {
+  if (!before || !after || before === after) return false;
+  const suffix = pathFilter ? ` -- ${pathFilter}` : '';
+  const raw = git(`diff --name-only ${before} ${after}${suffix}`, gitRoot);
+  if (!raw) return false;
+  return raw.split('\n').some(l => path.basename(l.trim()) === 'requirements.txt');
+}
+
+async function restartAfterCodeUpdate(appName, needsRebuild, log) {
+  if (needsRebuild && dockerController.isManaged(appName)) {
+    log('deploy', '🔧 requirements.txt mudou — reconstruindo a imagem (docker compose up -d --build)...');
+    await dockerController.rebuild(appName, { build: true });
+    return;
+  }
+  await pm2Do('restart', appName);
+}
+
 function installDeps(cwd, cwdWin, log) {
   if (fs.existsSync(path.join(cwdWin, 'package.json'))) {
     const hasLockFile = fs.existsSync(path.join(cwdWin, 'package-lock.json'));
@@ -1861,14 +1900,14 @@ async function deployApp(appName) {
             execSync('git push', { cwd: gitRoot, encoding: 'utf8', timeout: 30000 });
           } catch (e) { throw new Error('git push falhou: ' + e.message.split('\n')[0]); }
           log('deploy', 'Push OK');
-          log('deploy', '🔄 Agendando restart via processo filho (pm2 restart)...');
-          const pm2Path = require.resolve('pm2');
-          const restartCode = `const pm2=require(${JSON.stringify(pm2Path)});setTimeout(()=>{pm2.connect(e=>{if(!e)pm2.restart(${JSON.stringify(appName)},()=>pm2.disconnect());});},1500);`;
+          log('deploy', '🔄 Agendando auto-restart (Serviço do Windows sobe uma nova instância)...');
+          const killCode = `setTimeout(()=>{try{process.kill(${process.pid})}catch(e){}},4000);`;
           const { spawn: spawnRestart } = require('child_process');
-          spawnRestart(process.execPath, ['-e', restartCode], { detached: true, stdio: 'ignore', cwd: __dirname }).unref();
+          spawnRestart(process.execPath, ['-e', killCode], { detached: true, stdio: 'ignore', cwd: __dirname }).unref();
         } else {
           log('deploy', '🧪 Testando alterações (restart + verificação)...');
-          await pm2Do('restart', appName);
+          const localNeedsRebuild = localChanges.some(l => l.trim().endsWith('requirements.txt'));
+          await restartAfterCodeUpdate(appName, localNeedsRebuild, log);
           log('deploy', 'Aguardando processo online...');
           const online = await waitOnline(appName);
           if (!online) throw new Error('❌ Teste falhou — app não ficou online. Alterações NÃO foram commitadas.');
@@ -1923,6 +1962,8 @@ async function deployApp(appName) {
         log('deploy', pullOut || '(sem alterações)');
         const commitAfter = git('rev-parse --short HEAD', gitRoot);
         const changed = commitBefore && commitAfter && commitBefore !== commitAfter;
+        const pathFilter = getPathFilter(cwd, gitRoot);
+        const needsRebuild = changed && requirementsTxtChanged(gitRoot, pathFilter, commitBefore, commitAfter);
 
         if (changed) installDeps(cwd, cwdWin, log);
         let testPassed;
@@ -1931,17 +1972,17 @@ async function deployApp(appName) {
           log('deploy', '🧪 Testando em instância temporária antes de subir produção...');
           const staged = await stagedTest(appName, cwdWin, log);
           if (staged) {
-            log('deploy', '🚀 Teste OK — promovendo para produção (pm2 reload)...');
+            log('deploy', '🚀 Teste OK — promovendo para produção...');
             await pm2Reload(appName, log);
             online = await waitOnline(appName);
             testPassed = online;
-            if (!online) log('deploy', '❌ pm2 reload falhou — produção não ficou online.');
+            if (!online) log('deploy', '❌ falha ao promover — produção não ficou online.');
           } else {
             testPassed = false;
           }
         } else {
           log('deploy', '🧪 Testando código atualizado (restart + verificação)...');
-          await pm2Do('restart', appName);
+          await restartAfterCodeUpdate(appName, needsRebuild, log);
           log('deploy', 'Aguardando processo online...');
           online = await waitOnline(appName);
           const httpOkRemote = online ? await (async () => {
@@ -1957,13 +1998,13 @@ async function deployApp(appName) {
           log('deploy', `❌ Teste falhou — fazendo rollback para ${commitBefore}...`);
           git(`reset --hard ${commitBefore}`, gitRoot);
           installDeps(cwd, cwdWin, log);
-          await pm2Do('restart', appName);
+          await restartAfterCodeUpdate(appName, needsRebuild, log);
           const backOnline = await waitOnline(appName);
           log('deploy', backOnline
             ? `⏪ Rollback OK — voltou para ${commitBefore} e está online`
             : `⚠️ Rollback feito para ${commitBefore} mas app continua offline`);
 
-          const errLogs = readPm2ErrorLog(appName, 10);
+          const errLogs = await readPm2ErrorLog(appName, 10);
           const rollbackInfo = await pm2Info(appName);
           const rollbackWpp = `❌ *Deploy FALHOU* — ${appLabel(appName)}\n📅 ${now()}\n${'━'.repeat(25)}\n\n` +
             `📂 *Modo:* Atualização remota\n` +
@@ -2008,7 +2049,7 @@ async function deployApp(appName) {
       log('deploy', '(sem .git — pulando git)');
       installDeps(cwd, cwdWin, log);
 
-      log('deploy', 'pm2 restart...');
+      log('deploy', 'restart...');
       await pm2Do('restart', appName);
       log('deploy', 'Aguardando processo online...');
       const online = await waitOnline(appName);
@@ -2029,7 +2070,7 @@ async function deployApp(appName) {
     }
   } catch (err) {
     log('deploy', `━━━ DEPLOY FALHOU: ${err.message} ━━━`);
-    const errLogs = readPm2ErrorLog(appName, 10);
+    const errLogs = await readPm2ErrorLog(appName, 10);
     const failInfo = await pm2Info(appName);
     const gitRoot2 = findGitRoot(cwd);
     const failBranch = gitRoot2 ? git('rev-parse --abbrev-ref HEAD', gitRoot2) : null;
@@ -2105,11 +2146,6 @@ setInterval(sendSummary, 30 * 60 * 1000);
 setTimeout(sendSummary, 90 * 1000);
 
 async function checkWhatsappStuckQueue() {
-  // Só considera STATUS='AGUARDANDO_ACK': é a única fila que o próprio bot.js
-  // drena (varredura a cada 60s em processarAguardandoAckFila). STATUS='PENDENTE'
-  // não é tocado pelo bot.js — existem dezenas de linhas PENDENTE órfãs, com meses
-  // de idade e tentativas já esgotadas por outro processo, então usá-las aqui geraria
-  // falso positivo constante e reiniciaria o bot sem necessidade.
   const APP_ALVO = 'whatsapp-bot';
   try {
     const pool = await getPool();
@@ -2180,8 +2216,8 @@ let lastPollTime   = null;
 let cachedGitInfo  = {};
 let pollErrors     = {};
 const pollErrorAt  = {};
-const pollErrorLogAt = {};  // throttle console.error: chave → último log
-const POLL_ERROR_LOG_WINDOW_MS = 30 * 60 * 1000; // 30 min
+const pollErrorLogAt = {};  
+const POLL_ERROR_LOG_WINDOW_MS = 30 * 60 * 1000; 
 
 async function refreshGitCache() {
   const info = {};
@@ -2204,7 +2240,7 @@ async function pollGitUpdates() {
   const startedAt = now();
   console.log(`[poll] Verificando atualizações em ${Object.keys(APP_REGISTRY).length} apps...`);
 
-  const fetchedRoots = new Map(); // gitRoot → fetchResult (dedup por ciclo)
+  const fetchedRoots = new Map(); 
   let consecutiveTimeouts = 0;
   for (const [appName, cwd] of Object.entries(APP_REGISTRY)) {
     if (DEPLOY_EXCLUDE.has(appName)) continue;
@@ -2214,10 +2250,7 @@ async function pollGitUpdates() {
 
     const gitRoot = findGitRoot(cwd);
     if (!gitRoot) continue;
-
-    // Sem credencial configurada, pula o fetch — não há como autenticar sem interação
     if (!GIT_AUTH_CONFIGURED) continue;
-
     try {
       let fetchResult;
       if (fetchedRoots.has(gitRoot)) {
@@ -2248,7 +2281,6 @@ async function pollGitUpdates() {
       }
       consecutiveTimeouts = 0;
       if (pollErrors[appName]) {
-        // Se tinha erro antes e agora ok, zera o throttle para logar a recuperação na próxima falha
         const oldKey = `${appName}:${pollErrors[appName]}`;
         delete pollErrorLogAt[oldKey];
       }
@@ -2522,6 +2554,7 @@ app.get('/api/apps', async (req, res) => {
         pid:        p.pid,
         port:       readAppPort(p.name),
         hasGit:     !!APP_REGISTRY[p.name] && !!findGitRoot(APP_REGISTRY[p.name]),
+        isDocker:   dockerController.isManaged(p.name),
         deploying:  deployLock.has(p.name),
         lastCommit: commits[i] || null,
         hasAttention: !!attentionReason,
@@ -2531,6 +2564,53 @@ app.get('/api/apps', async (req, res) => {
       };
     });
     res.json(data);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+const APP_BY_REPO_AND_FILE = (() => {
+  const m = new Map();
+  for (const [appName, wf] of Object.entries(APP_GITHUB_WORKFLOW)) {
+    m.set(`${wf.repo}::${wf.file}`, appName);
+  }
+  return m;
+})();
+
+function timeAgo(iso) {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const min = Math.floor(diffMs / 60000);
+  if (min < 1) return 'agora';
+  if (min < 60) return `${min}min atrás`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h}h atrás`;
+  return `${Math.floor(h / 24)}d atrás`;
+}
+
+app.get('/api/actions/runs', async (req, res) => {
+  try {
+    const repos = [...new Set(Object.values(APP_GITHUB_WORKFLOW).map(wf => wf.repo))];
+    const headers = { Authorization: `token ${process.env.GITHUB_TOKEN}`, Accept: 'application/vnd.github+json' };
+    const results = await Promise.all(repos.map(async (repo) => {
+      try {
+        const { data } = await axios.get(`https://api.github.com/repos/${GITHUB_OWNER}/${repo}/actions/runs`, {
+          headers, timeout: 10000, params: { per_page: 8 },
+        });
+        return (data.workflow_runs || []).map(r => ({
+          app: APP_BY_REPO_AND_FILE.get(`${repo}::${r.path.split('/').pop()}`) || null,
+          repo,
+          status: r.status,
+          conclusion: r.conclusion,
+          branch: r.head_branch,
+          actor: r.actor?.login || '',
+          url: r.html_url,
+          createdAt: r.created_at,
+          createdAgo: timeAgo(r.created_at),
+        }));
+      } catch (e) {
+        return [];
+      }
+    }));
+    const all = results.flat().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 30);
+    res.json(all);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -2561,7 +2641,7 @@ app.get('/api/apps/:name/error-detail', (req, res) => {
       const runtime = getRuntimeAlert(name);
       const deployErr = deployHistory.find(item => item.app === name && item.status === 'error');
       const fromBuffer = getLatestErrorFromBuffer(name);
-      const pm2ErrorTail = readPm2ErrorLog(name, 80);
+      const pm2ErrorTail = await readPm2ErrorLog(name, 80);
       const latestFullDetail = pm2ErrorTail || latest?.detail || fromBuffer || runtime?.reason || pollErrors[name] || (deployErr ? deployErr.detail : null) || null;
 
       res.json({
