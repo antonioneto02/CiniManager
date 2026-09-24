@@ -16,3 +16,6 @@ backups/
 *.crt
 *.pem
 *.pfx
+
+# Override de Docker Compose especifico deste host (contorna bug de rede/HNS)
+docker-compose.override.yml

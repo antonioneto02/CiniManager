@@ -1532,7 +1532,7 @@ async function commitAndPushIfNeeded(appName, log) {
     try {
       execSync(`git -c user.name="CINI Manager" -c user.email="deploy@cini.com.br" commit -m "${commitMsg}"`,
         { cwd: gitRoot, encoding: 'utf8', timeout: 15000 });
-    } catch (e) { throw new Error('git commit falhou: ' + e.message.split('\n')[0]); }
+    } catch (e) { throw new Error('git commit falhou: ' + (e.stderr || e.message || '').toString().trim().split('\n').slice(0, 3).join(' | ')); }
     try {
       execSync(`git tag "deploy-${appName}-${versionId}"`, { cwd: gitRoot, encoding: 'utf8', timeout: 10000 });
     } catch {}
@@ -1543,7 +1543,7 @@ async function commitAndPushIfNeeded(appName, log) {
     log('deploy', `📤 ${unpushed.length} commit(s) não publicado(s) — publicando (git push)...`);
     try {
       execSync('git push --follow-tags', { cwd: gitRoot, encoding: 'utf8', timeout: 30000 });
-    } catch (e) { throw new Error('git push falhou: ' + e.message.split('\n')[0]); }
+    } catch (e) { throw new Error('git push falhou: ' + (e.stderr || e.message || '').toString().trim().split('\n').slice(0, 3).join(' | ')); }
   }
 }
 
@@ -1892,13 +1892,13 @@ async function deployApp(appName) {
             try {
               execSync(`git -c user.name="CINI Manager" -c user.email="deploy@cini.com.br" commit -m "${commitMsg}"`,
                 { cwd: gitRoot, encoding: 'utf8', timeout: 15000 });
-            } catch (e) { throw new Error('git commit falhou: ' + e.message.split('\n')[0]); }
+            } catch (e) { throw new Error('git commit falhou: ' + (e.stderr || e.message || '').toString().trim().split('\n').slice(0, 3).join(' | ')); }
             log('deploy', 'Commit criado');
           }
           log('deploy', 'git push...');
           try {
             execSync('git push', { cwd: gitRoot, encoding: 'utf8', timeout: 30000 });
-          } catch (e) { throw new Error('git push falhou: ' + e.message.split('\n')[0]); }
+          } catch (e) { throw new Error('git push falhou: ' + (e.stderr || e.message || '').toString().trim().split('\n').slice(0, 3).join(' | ')); }
           log('deploy', 'Push OK');
           log('deploy', '🔄 Agendando auto-restart (Serviço do Windows sobe uma nova instância)...');
           const killCode = `setTimeout(()=>{try{process.kill(${process.pid})}catch(e){}},4000);`;
@@ -1924,13 +1924,13 @@ async function deployApp(appName) {
             try {
               execSync(`git -c user.name="CINI Manager" -c user.email="deploy@cini.com.br" commit -m "${commitMsg}"`,
                 { cwd: gitRoot, encoding: 'utf8', timeout: 15000 });
-            } catch (e) { throw new Error('git commit falhou: ' + e.message.split('\n')[0]); }
+            } catch (e) { throw new Error('git commit falhou: ' + (e.stderr || e.message || '').toString().trim().split('\n').slice(0, 3).join(' | ')); }
             log('deploy', 'Commit criado');
           }
           log('deploy', 'git push...');
           try {
             execSync('git push', { cwd: gitRoot, encoding: 'utf8', timeout: 30000 });
-          } catch (e) { throw new Error('git push falhou: ' + e.message.split('\n')[0]); }
+          } catch (e) { throw new Error('git push falhou: ' + (e.stderr || e.message || '').toString().trim().split('\n').slice(0, 3).join(' | ')); }
           log('deploy', 'Push OK');
         }
 
@@ -2642,7 +2642,7 @@ app.get('/api/apps/:name/error-detail', (req, res) => {
       const deployErr = deployHistory.find(item => item.app === name && item.status === 'error');
       const fromBuffer = getLatestErrorFromBuffer(name);
       const pm2ErrorTail = await readPm2ErrorLog(name, 80);
-      const latestFullDetail = pm2ErrorTail || latest?.detail || fromBuffer || runtime?.reason || pollErrors[name] || (deployErr ? deployErr.detail : null) || null;
+      const latestFullDetail = latest?.detail || fromBuffer || runtime?.reason || pollErrors[name] || (deployErr ? deployErr.detail : null) || pm2ErrorTail || null;
 
       res.json({
         app: name,
