@@ -12,6 +12,7 @@ $projects = @(
     @{ name = "hub-cini";            path = "E:\Projetos\Hub_Cini" },
     @{ name = "cini-pricing";        path = "E:\Projetos\Cini-Pricing" },
     @{ name = "api-sicredi";         path = "E:\Projetos\API_Sicredi" },
+    @{ name = "api-itau";            path = "C:\Projetos\API_Itau" },
     @{ name = "notificador-pix";     path = "C:\Projetos\Confirmacao_Pix\NotificadorPIX" },
     @{ name = "whatsapp-bot";        path = "E:\Projetos\Central-Notificacoes\whatsapp-bot" },
     @{ name = "whatsapp-motoristas"; path = "E:\Projetos\Central-Notificacoes\WhatsAppMotoristas" }
