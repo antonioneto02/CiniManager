@@ -21,6 +21,7 @@ $apps = @{
   'hub-cini'         = 'E:/Projetos/Hub_Cini'
   'cini-pricing'     = 'E:/Projetos/Cini-Pricing'
   'api-sicredi'      = 'E:/Projetos/API_Sicredi'
+  'api-itau'         = 'C:/Projetos/API_Itau'
   'notificador-pix'  = 'C:/Projetos/Confirmacao_Pix/NotificadorPIX'
   'cini-dashboard'   = 'E:/Projetos/CiniManager/dashboard'
   'whatsapp-bot'          = 'E:/Projetos/Central-Notificacoes/whatsapp-bot'
