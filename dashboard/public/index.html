@@ -197,6 +197,7 @@ mark.log-hl{background:#d29922;color:#000;border-radius:2px;padding:0 2px;font-s
       <button class="btn btn-sm btn-blue" onclick="openAutoPoll()" id="btn-autopoll">🔄 Auto-deploy</button>
       <button class="btn btn-sm" onclick="openActionsRuns()">⚙️ Actions</button>
       <button class="btn btn-sm btn-yellow" onclick="openRestartResetModal()">🧹 Limpar restarts</button>
+      <button class="btn btn-sm" onclick="ackAllErrors()">✅ Marcar todos como visto</button>
       <button class="btn btn-sm" id="btn-db-target" onclick="openDbTarget()">🗄️ Banco: …</button>
       <button class="btn btn-sm btn-orange" onclick="doDeployAll()">🚀 Deploy All</button>
       <button class="btn btn-sm btn-red" onclick="actionAll('stop')">⏹ Stop All</button>
@@ -1980,6 +1981,17 @@ async function markErrorAsSeen() {
 async function quickAckError(name) {
   try { applyAckLocally(name); } catch(e) { console.error('[ack] applyAckLocally:', e); }
   try { await api('POST', `/api/apps/${encodeURIComponent(name)}/ack-errors`); } catch(e) { console.error('[ack] endpoint:', e); }
+  loadApps();
+}
+
+async function ackAllErrors() {
+  if (!confirm('Marcar TODOS os erros de TODAS as apps como vistos?')) return;
+  try {
+    const r = await api('POST', '/api/apps/ack-errors-all');
+    toast(`${r.total - r.failed}/${r.total} apps marcadas como vistas`);
+  } catch (e) {
+    toast(`Erro: ${e.message}`);
+  }
   loadApps();
 }
 

@@ -1122,12 +1122,6 @@ setInterval(() => {
 }, 15 * 60 * 1000);
 
 async function pm2Do(action, target) {
-  if (target !== 'all' && ['start', 'restart'].includes(action) && APP_GITHUB_WORKFLOW[target]) {
-    const log = (src, txt) => { bufferLog(target, src, txt); console.log(`[deploy:${target}] ${txt}`); };
-    await commitAndPushIfNeeded(target, log);
-    await triggerGithubActionsRun(target, log);
-    return;
-  }
   if (target !== 'all' && !dockerController.isManaged(target)) {
     if (action === 'restart') {
       return pm2Reload(target, () => {});
@@ -1135,6 +1129,22 @@ async function pm2Do(action, target) {
     throw new Error(`App "${target}" não roda em Docker — só a ação "restart" é suportada por aqui (start/stop precisam ser feitos direto no PM2).`);
   }
   return dockerController.doAction(action, target);
+}
+
+// So pra cliques manuais no dashboard (start/restart) -- NAO usar em
+// restarts automaticos internos (auto-deploy poller, reset-restarts,
+// webhooks de auto-restart), que ja tem sua propria validacao e
+// precisam continuar rapidos/locais pra nao formar loop com o
+// checker de "processo desatualizado" (ele so olha a hora que o
+// CONTAINER subiu, que um restart rapido via supervisor nao muda).
+async function pm2DoViaActions(action, target) {
+  if (target !== 'all' && ['start', 'restart'].includes(action) && APP_GITHUB_WORKFLOW[target]) {
+    const log = (src, txt) => { bufferLog(target, src, txt); console.log(`[deploy:${target}] ${txt}`); };
+    await commitAndPushIfNeeded(target, log);
+    await triggerGithubActionsRun(target, log);
+    return;
+  }
+  return pm2Do(action, target);
 }
 
 
@@ -1556,10 +1566,15 @@ async function triggerGithubActionsRun(appName, log) {
   const base = `https://api.github.com/repos/${GITHUB_OWNER}/${repo}`;
   const headers = { Authorization: `token ${process.env.GITHUB_TOKEN}`, Accept: 'application/vnd.github+json' };
 
+  // Nem todo repo usa "main" (ex: ContagemProdutos usa "master") -- detecta
+  // a branch local em vez de fixar, senao o dispatch falha com 422.
+  const gitRoot = findGitRoot(APP_REGISTRY[appName]);
+  const branch = (gitRoot && git('rev-parse --abbrev-ref HEAD', gitRoot)) || 'main';
+
   try {
     const dispatchedAt = Date.now();
-    log('deploy', `🚀 Disparando ${file} no GitHub Actions...`);
-    await axios.post(`${base}/actions/workflows/${file}/dispatches`, { ref: 'main' }, { headers, timeout: 10000 });
+    log('deploy', `🚀 Disparando ${file} no GitHub Actions (branch: ${branch})...`);
+    await axios.post(`${base}/actions/workflows/${file}/dispatches`, { ref: branch }, { headers, timeout: 10000 });
 
     let run = null;
     const findDeadline = Date.now() + 30000;
@@ -1574,8 +1589,8 @@ async function triggerGithubActionsRun(appName, log) {
     }
     if (!run) throw new Error('Não encontrei a execução no GitHub Actions após disparar (timeout de 30s).');
     log('deploy', `🔗 Acompanhando: ${run.html_url}`);
-
-    const deadline = Date.now() + 10 * 60 * 1000;
+    
+    const deadline = Date.now() + 30 * 60 * 1000;
     let lastStatus = '';
     while (Date.now() < deadline) {
       const { data: r2 } = await axios.get(run.url, { headers, timeout: 10000 });
@@ -2305,8 +2320,15 @@ async function pollGitUpdates() {
             const list = await pm2List();
             const proc = list.find(p => p.name === appName);
             const pmUptime = proc?.pm2_env?.pm_uptime;
-            if (pmUptime && commitMs > pmUptime && proc?.pm2_env?.status === 'online') {
-              console.log(`[poll] ${appName}: processo desatualizado — commit ${new Date(commitMs).toISOString()} > start ${new Date(pmUptime).toISOString()}`);
+            // pmUptime e a hora que o CONTAINER subiu -- um restart rapido
+            // via supervisor-trigger (sem docker compose) nunca muda isso,
+            // entao usa tambem o ultimo restart interno registrado, senao
+            // essa checagem acha "desatualizado" pra sempre depois do
+            // primeiro restart rapido e fica reiniciando em loop.
+            const lastInternalRestart = dockerController.restartCounts.get(appName)?.lastRestartAt || 0;
+            const effectiveStart = Math.max(pmUptime || 0, lastInternalRestart);
+            if (effectiveStart && commitMs > effectiveStart && proc?.pm2_env?.status === 'online') {
+              console.log(`[poll] ${appName}: processo desatualizado — commit ${new Date(commitMs).toISOString()} > start ${new Date(effectiveStart).toISOString()}`);
               bufferLog(appName, 'deploy', `🔄 Código atualizado no servidor — processo desatualizado, reiniciando...`);
               await sendWhatsApp(
                 `🔄 *Reinício automático* — ${appLabel(appName)}\n📅 ${now()}\n` +
@@ -2660,26 +2682,29 @@ app.get('/api/apps/:name/error-detail', (req, res) => {
   })();
 });
 
+async function ackErrorsForApp(name) {
+  runtimeAlerts.delete(name);
+  delete pollErrors[name];
+  delete pollErrorAt[name];
+  await ackErrorsInDB(name);
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('aplicacao', sql.NVarChar(100), name).query(`
+      SELECT MAX(DTVISTO) AS ULTIMA FROM dbo.CINI_MANAGER_ERRO_HISTORICO WHERE APLICACAO = @aplicacao
+    `);
+    const last = r.recordset[0]?.ULTIMA;
+    if (last) acknowledgedAlertAt.set(name, new Date(last).getTime());
+    else acknowledgedAlertAt.set(name, Date.now());
+  } catch (e) {
+    acknowledgedAlertAt.set(name, Date.now());
+  }
+}
+
 app.post('/api/apps/:name/ack-errors', async (req, res) => {
   const { name } = req.params;
   console.log(`[ack] recebido para app="${name}", no registry=${!APP_REGISTRY[name]}`);
   try {
-    runtimeAlerts.delete(name);
-    delete pollErrors[name];
-    delete pollErrorAt[name];
-    await ackErrorsInDB(name);
-    try {
-      const pool = await getPool();
-      const r = await pool.request().input('aplicacao', sql.NVarChar(100), name).query(`
-        SELECT MAX(DTVISTO) AS ULTIMA FROM dbo.CINI_MANAGER_ERRO_HISTORICO WHERE APLICACAO = @aplicacao
-      `);
-      const last = r.recordset[0]?.ULTIMA;
-      if (last) acknowledgedAlertAt.set(name, new Date(last).getTime());
-      else acknowledgedAlertAt.set(name, Date.now());
-    } catch (e) {
-      acknowledgedAlertAt.set(name, Date.now());
-    }
-
+    await ackErrorsForApp(name);
     pushErrorHistory();
     return res.json({ ok: true, app: name, cleared: true });
   } catch (e) {
@@ -2688,10 +2713,27 @@ app.post('/api/apps/:name/ack-errors', async (req, res) => {
   }
 });
 
+app.post('/api/apps/ack-errors-all', async (req, res) => {
+  console.log('[ack-all] recebido pra todas as apps');
+  const names = Object.keys(APP_REGISTRY);
+  const results = [];
+  for (const name of names) {
+    try {
+      await ackErrorsForApp(name);
+      results.push({ app: name, ok: true });
+    } catch (e) {
+      results.push({ app: name, ok: false, error: e.message });
+    }
+  }
+  pushErrorHistory();
+  const failed = results.filter(r => !r.ok);
+  res.json({ ok: true, total: names.length, failed: failed.length, results });
+});
+
 app.post('/api/apps/:name/:action(start|stop|restart)', async (req, res) => {
   const { name, action } = req.params;
   try {
-    await pm2Do(action, name);
+    await pm2DoViaActions(action, name);
     if (['restart','stop','start'].includes(action)) {
       addDeployHistory({ time: now(), app: name, status: 'ok', detail: action });
     }
@@ -3229,7 +3271,7 @@ app.post('/api/bot/action', botAuthMiddleware, async (req, res) => {
   if (!APP_REGISTRY[appName])
     return res.status(404).json({ error: `App "${appName}" não encontrado` });
   try {
-    await pm2Do(action, appName);
+    await pm2DoViaActions(action, appName);
     addDeployHistory({ time: now(), app: appName, status: 'ok', detail: `${action} via WhatsApp` });
     res.json({ ok: true });
   } catch (e) {
