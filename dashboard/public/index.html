@@ -408,7 +408,7 @@ const DOCS_APPS = new Set([
 const HTTPS_APPS = new Set([
   'whatsapp-webnode', 'webhook-whatsapp', 'whatsapp-motoristas', 'whatsapp-pix-motoristas',
   'portal-consultas', 'portal-vagas-rh', 'cini-tracking', 'coleta-sac', 'portal-intranet',
-  'portal-rnc', 'portal-acoes', 'portal-resultados', 'contagem-armazens', 'solicitacao-fachada',
+  'portal-rnc', 'portal-acoes', 'planner-cini', 'portal-resultados', 'contagem-armazens', 'solicitacao-fachada',
   'contagem-produtos', 'erp-cini', 'wf-cini', 'central-tarefas', 'hub-cini', 'cini-pricing',
   'notificador-pix', 'whatsapp-bot', 'portal-api', 'portal-ete', 'cini-leads', 'kanban-entregas',
   'gestao-importacao-pedidos', 'portal-televendas', 'protheus-auth', 'portal-marketing', 'cini-dashboard',
@@ -459,6 +459,7 @@ const DISPLAY_NAMES = {
   'portal-televendas': 'Portal Televendas',
   'solicitacao-fachada': 'Solicitação de Fachada',
   'formulario-cat': 'Formulário CAT',
+  'planner-cini': 'Planner Cini',
 };
 function displayName(name) { return DISPLAY_NAMES[name] || name; }
 const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');

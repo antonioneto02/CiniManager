@@ -29,6 +29,7 @@
   'portal-intranet':      'C:/Projetos/PortalIntranetCini',
   'portal-rnc':           'C:/Projetos/PortalRNC',
   'portal-acoes':         'C:/Projetos/PortalAcoes',
+  'planner-cini':         'C:/Projetos/PlannerCini',
   'portal-resultados':    'C:/Projetos/PortalResultados',
   'kanban-entregas':      'C:/Projetos/KanbanEntregas',
   'gestao-importacao-pedidos': 'C:/Projetos/GestaoImportacaoPedidos',

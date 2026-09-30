@@ -276,7 +276,7 @@ const { APP_REGISTRY, CONTAINER_NAME_OVERRIDES } = require('./app-registry');
 const DEPLOY_EXCLUDE    = new Set(['log-watcher']);
 const STAGED_DEPLOY_APPS = new Set(['cini-dashboard']);
 const NOTIFY_EXCLUDE = new Set(['log-watcher']);
-const HTTPS_APPS = new Set(['whatsapp-webnode', 'whatsapp-motoristas', 'whatsapp-pix-motoristas', 'portal-consultas', 'portal-vagas-rh', 'cini-tracking', 'coleta-sac', 'portal-intranet', 'portal-rnc', 'portal-acoes', 'portal-resultados', 'contagem-armazens', 'solicitacao-fachada', 'contagem-produtos', 'erp-cini', 'wf-cini', 'central-tarefas', 'hub-cini', 'cini-pricing', 'notificador-pix', 'whatsapp-bot', 'portal-api', 'portal-ete', 'cini-leads', 'kanban-entregas', 'gestao-importacao-pedidos', 'portal-televendas', 'protheus-auth', 'portal-marketing', 'cini-dashboard']);
+const HTTPS_APPS = new Set(['whatsapp-webnode', 'whatsapp-motoristas', 'whatsapp-pix-motoristas', 'portal-consultas', 'portal-vagas-rh', 'cini-tracking', 'coleta-sac', 'portal-intranet', 'portal-rnc', 'portal-acoes', 'planner-cini', 'portal-resultados', 'contagem-armazens', 'solicitacao-fachada', 'contagem-produtos', 'erp-cini', 'wf-cini', 'central-tarefas', 'hub-cini', 'cini-pricing', 'notificador-pix', 'whatsapp-bot', 'portal-api', 'portal-ete', 'cini-leads', 'kanban-entregas', 'gestao-importacao-pedidos', 'portal-televendas', 'protheus-auth', 'portal-marketing', 'cini-dashboard']);
 const AUTOPOLL_FILE = path.join(__dirname, '.autopoll.json');
 const CARD_ORDER_FILE = path.join(__dirname, '.card-order.json');
 const DISPLAY_NAMES = {
@@ -309,6 +309,7 @@ const DISPLAY_NAMES = {
   'portal-intranet':    'Intranet Cini',
   'portal-rnc':         'Portal RNC',
   'portal-acoes':       'Portal de Ações',
+  'planner-cini':       'Planner Cini',
   'portal-resultados':  'Portal de Resultados',
   'kanban-entregas':    'Kanban Controle de Entregas',
   'gestao-importacao-pedidos': 'Gestão de Importação de Pedidos',
@@ -1500,6 +1501,7 @@ const APP_GITHUB_WORKFLOW = {
   'portal-intranet':          { repo: 'PortalIntranetCini',      file: 'deploy.yml' },
   'portal-rnc':                { repo: 'PortalRNC',               file: 'deploy.yml' },
   'portal-acoes':              { repo: 'PortalAcoes',             file: 'deploy.yml' },
+  'planner-cini':              { repo: 'PlannerCini',             file: 'deploy.yml' },
   'portal-resultados':        { repo: 'PortalResultados',        file: 'deploy.yml' },
   'kanban-entregas':          { repo: 'KanbanEntregas',          file: 'deploy.yml' },
   'gestao-importacao-pedidos': { repo: 'GestaoImportacaoPedidos', file: 'deploy.yml' },
