@@ -400,7 +400,7 @@ let selectedGroupId = 'all';
 let appFilter = '';
 const DOCS_APPS = new Set([
   'api-weduu','erp-cini','wf-cini','central-tarefas',
-  'hub-cini','cini-pricing','api-sicredi','notificador-pix',
+  'hub-cini','cini-pricing','api-sicredi','api-itau','notificador-pix',
   'whatsapp-bot','webhook-whatsapp','whatsapp-motoristas',
   'whatsapp-webnode','portal-consultas','central-notificacoes',
   'client-baixas-pix','gerenciador-cargas'
@@ -440,6 +440,7 @@ const DISPLAY_NAMES = {
   'hub-cini': 'HUB Cini',
   'cini-pricing': 'Pricing Cini',
   'api-sicredi': 'API Sicredi',
+  'api-itau': 'API Itaú (SISPAG)',
   'notificador-pix': 'Notificações PIX',
   'whatsapp-bot': 'BOT WhatsApp',
   'portal-consultas': 'Portal de Consultas',
@@ -467,6 +468,7 @@ const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replac
 const SERVICE_LOG_FILTERS = {
   'client-baixas-pix':   [{l:'Erro',t:'error'},{l:'TXID',t:'txid'},{l:'Baixa',t:'baixa'},{l:'PIX',t:'pix'},{l:'Webhook',t:'webhook'},{l:'Timeout',t:'timeout'},{l:'SQL',t:'sql'}],
   'notificador-pix':     [{l:'Erro',t:'error'},{l:'TXID',t:'txid'},{l:'PIX',t:'pix'},{l:'Enviado',t:'enviado'},{l:'Falha',t:'falha'},{l:'Timeout',t:'timeout'}],
+  'api-itau':            [{l:'Erro',t:'error'},{l:'Transferência',t:'transferencia'},{l:'Pagamentos',t:'pagamentos'},{l:'Token',t:'auth'},{l:'Segurança',t:'segurança'},{l:'HTTP 4xx',t:'http 4'},{l:'Timeout',t:'timeout'}],
   'api-sicredi':         [{l:'Erro',t:'error'},{l:'PIX',t:'pix'},{l:'Boleto',t:'boleto'},{l:'Cobrança',t:'cobranc'},{l:'Token',t:'token'},{l:'Timeout',t:'timeout'},{l:'Webhook',t:'webhook'}],
   'erp-cini':            [{l:'Erro',t:'error'},{l:'Entrada',t:'entrada'},{l:'Saída',t:'saida'},{l:'Usuário',t:'usuario'},{l:'SQL',t:'sql'},{l:'Acesso negado',t:'acesso negado'}],
   'portal-consultas':    [{l:'Erro',t:'error'},{l:'SQL',t:'sql'},{l:'Request',t:'request'},{l:'Auth',t:'auth'},{l:'Timeout',t:'timeout'},{l:'500',t:' 500'},{l:'404',t:' 404'}],

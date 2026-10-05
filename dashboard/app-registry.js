@@ -7,6 +7,7 @@
   'hub-cini':        'C:/Projetos/Hub_Cini',
   'cini-pricing':    'C:/Projetos/Cini-Pricing',
   'api-sicredi':     'C:/Projetos/ApiSicredi',
+  'api-itau':        'C:/Projetos/API_Itau',
   'notificador-pix': 'C:/Projetos/Confirmacao_Pix/NotificadorPIX',
   'log-watcher':     'C:/Projetos/CiniManager',
   'cini-dashboard':  'C:/Projetos/CiniManager/dashboard',
