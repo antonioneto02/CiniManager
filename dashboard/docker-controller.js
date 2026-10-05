@@ -310,11 +310,6 @@ class DockerController {
           await execFileP('docker', ['exec', containerName, ...runtime.trigger], { timeout: 15000 });
         }
       } else if (running) {
-        // docker restart e uma unica chamada atomica processada pelo daemon:
-        // sobrevive mesmo se o processo cliente (rodando dentro do proprio
-        // container, caso do cini-dashboard se reiniciando) morrer no meio.
-        // "docker compose up -d" e multi-etapa (parar/remover/criar/iniciar)
-        // orquestrado pelo cliente e trava pela metade nesse cenario.
         await execFileP('docker', ['restart', containerName], { timeout: 60000 });
       } else {
         await execFileP('docker', ['compose', 'up', '-d'], { cwd: dir, timeout: 180000 });

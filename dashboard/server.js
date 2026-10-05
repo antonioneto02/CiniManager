@@ -1461,9 +1461,18 @@ async function stagedTest(appName, cwdWin, log) {
   }
 }
 
+// safe.directory=* via env evita "dubious ownership" (serviço roda com usuário diferente do dono dos repos)
+{
+  const n = parseInt(process.env.GIT_CONFIG_COUNT || '0', 10) || 0;
+  process.env[`GIT_CONFIG_KEY_${n}`] = 'safe.directory';
+  process.env[`GIT_CONFIG_VALUE_${n}`] = '*';
+  process.env.GIT_CONFIG_COUNT = String(n + 1);
+}
+
 const GIT_ENV = {
   ...process.env,
   GIT_TERMINAL_PROMPT: '0',
+  GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND || 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15',
   GCM_INTERACTIVE: 'never',
   GIT_HTTP_LOW_SPEED_LIMIT: '1024',
   GIT_HTTP_LOW_SPEED_TIME: '20',
@@ -1521,6 +1530,10 @@ const APP_GITHUB_WORKFLOW = {
   'contagem-armazens':        { repo: 'ContagemArmazens',        file: 'deploy.yml' },
   'solicitacao-fachada':      { repo: 'SolicitacaoFachada',      file: 'deploy.yml' },
   'assistente-ia':            { repo: 'AssistenteIA',            file: 'deploy.yml' },
+  'api-itau':                 { repo: 'API_Itau',                file: 'deploy.yml' },
+  'controle-formulario-qualidade': { repo: 'ControleFormularioQualidade', file: 'deploy.yml' },
+  'planner-cini':             { repo: 'PlannerCini',             file: 'deploy.yml' },
+  'webhook-whatsapp':         { repo: 'WhatsAppWebNode',          file: 'deploy.yml', owner: 'cinineriassousa' },
 };
 
 function generateVersionId() {
@@ -1562,12 +1575,9 @@ async function commitAndPushIfNeeded(appName, log) {
 async function triggerGithubActionsRun(appName, log) {
   const wf = APP_GITHUB_WORKFLOW[appName];
   log = log || ((src, txt) => { bufferLog(appName, src, txt); console.log(`[gh-actions:${appName}] ${txt}`); });
-  const { repo, file } = wf;
-  const base = `https://api.github.com/repos/${GITHUB_OWNER}/${repo}`;
+  const { repo, file, owner } = wf;
+  const base = `https://api.github.com/repos/${owner || GITHUB_OWNER}/${repo}`;
   const headers = { Authorization: `token ${process.env.GITHUB_TOKEN}`, Accept: 'application/vnd.github+json' };
-
-  // Nem todo repo usa "main" (ex: ContagemProdutos usa "master") -- detecta
-  // a branch local em vez de fixar, senao o dispatch falha com 422.
   const gitRoot = findGitRoot(APP_REGISTRY[appName]);
   const branch = (gitRoot && git('rev-parse --abbrev-ref HEAD', gitRoot)) || 'main';
 
@@ -1649,6 +1659,17 @@ function gitFetch(cwd, timeoutMs = 45000) {
       if (!err) return resolve({ ok: true });
       const msg = (stderr || err.message || '').trim();
       if (err.killed || /timed? ?out/i.test(msg)) return resolve({ ok: false, reason: 'git fetch timeout' });
+      if (/dubious ownership|safe\.directory/i.test(msg)) return resolve({ ok: false, reason: 'git fetch falhou (dubious ownership)' });
+      if (/not a git repository/i.test(msg)) return resolve({ ok: false, reason: 'git fetch falhou (não é repositório git)' });
+      if (/index\.lock|\.lock['"]? *:|unable to create .*\.lock|another git process/i.test(msg)) {
+        try {
+          const lock = path.join(cwd, '.git', 'index.lock');
+          if (fs.existsSync(lock) && Date.now() - fs.statSync(lock).mtimeMs > 10 * 60 * 1000) fs.unlinkSync(lock);
+        } catch {}
+        return resolve({ ok: false, reason: 'git fetch falhou (lock do git)' });
+      }
+      if (/permission denied \(publickey\)|host key verification/i.test(msg)) return resolve({ ok: false, reason: 'git fetch falhou (chave SSH)' });
+      if (/repository not found|not found|does not appear to be a git repository/i.test(msg)) return resolve({ ok: false, reason: 'git fetch falhou (repositório/remote não encontrado)' });
       if (/authentication|auth|403|401|credential|password|token/i.test(msg)) return resolve({ ok: false, reason: 'git fetch falhou (autenticação)' });
       if (/could not resolve|unable to connect|network|ETIMEDOUT|ECONNREFUSED/i.test(msg)) return resolve({ ok: false, reason: 'git fetch falhou (rede)' });
       return resolve({ ok: false, reason: `git fetch falhou: ${msg.split('\n')[0].slice(0, 120)}` });
@@ -2320,11 +2341,6 @@ async function pollGitUpdates() {
             const list = await pm2List();
             const proc = list.find(p => p.name === appName);
             const pmUptime = proc?.pm2_env?.pm_uptime;
-            // pmUptime e a hora que o CONTAINER subiu -- um restart rapido
-            // via supervisor-trigger (sem docker compose) nunca muda isso,
-            // entao usa tambem o ultimo restart interno registrado, senao
-            // essa checagem acha "desatualizado" pra sempre depois do
-            // primeiro restart rapido e fica reiniciando em loop.
             const lastInternalRestart = dockerController.restartCounts.get(appName)?.lastRestartAt || 0;
             const effectiveStart = Math.max(pmUptime || 0, lastInternalRestart);
             if (effectiveStart && commitMs > effectiveStart && proc?.pm2_env?.status === 'online') {
@@ -2611,11 +2627,11 @@ function timeAgo(iso) {
 
 app.get('/api/actions/runs', async (req, res) => {
   try {
-    const repos = [...new Set(Object.values(APP_GITHUB_WORKFLOW).map(wf => wf.repo))];
+    const repoPairs = [...new Map(Object.values(APP_GITHUB_WORKFLOW).map(wf => [`${wf.owner || GITHUB_OWNER}/${wf.repo}`, { owner: wf.owner || GITHUB_OWNER, repo: wf.repo }])).values()];
     const headers = { Authorization: `token ${process.env.GITHUB_TOKEN}`, Accept: 'application/vnd.github+json' };
-    const results = await Promise.all(repos.map(async (repo) => {
+    const results = await Promise.all(repoPairs.map(async ({ owner, repo }) => {
       try {
-        const { data } = await axios.get(`https://api.github.com/repos/${GITHUB_OWNER}/${repo}/actions/runs`, {
+        const { data } = await axios.get(`https://api.github.com/repos/${owner}/${repo}/actions/runs`, {
           headers, timeout: 10000, params: { per_page: 8 },
         });
         return (data.workflow_runs || []).map(r => ({

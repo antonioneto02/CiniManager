@@ -39,6 +39,10 @@
   'contagem-armazens':    'C:/Projetos/ContagemArmazens',
   'solicitacao-fachada':  'C:/Projetos/SolicitacaoFachada',
   'assistente-ia':        'C:/Projetos/AssistenteIA',
+  'api-itau':             'C:/Projetos/API_Itau',
+  'controle-formulario-qualidade': 'C:/Projetos/ControleFormularioQualidade',
+  'planner-cini':         'C:/Projetos/PlannerCini',
+  'webhook-whatsapp':     'C:/Projetos/WebhookWhatsAppNode',
 };
 
 const CONTAINER_NAME_OVERRIDES = {
