@@ -12,7 +12,7 @@ const DISK_LIMIT_PCT = 85;
 const DRIVES_TO_CHECK = ['C:', 'E:'];
 
 const DB = {
-  server:   'localhost',
+  server:   process.env.DB_SERVER_TRACKING || '177.104.136.230',
   database: 'dw',
   user:     'cini.tracking',
   password: 'k00b82f6j9TO6alM',

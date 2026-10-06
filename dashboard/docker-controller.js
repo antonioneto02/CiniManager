@@ -108,7 +108,12 @@ class DockerController {
   }
 
   resetRestartCount(appName) {
-    this.restartCounts.set(appName, { count: 0, lastRestartAt: 0 });
+    // Zera só o contador: lastRestartAt marca quando o processo subiu de novo
+    // via supervisor (o StartedAt do container não muda) e o poll usa isso pra
+    // decidir se o processo está "desatualizado" — zerar aqui gerava restart
+    // em loop a cada ciclo depois de um "zerar reinícios" no painel.
+    const prev = this.restartCounts.get(appName) || { lastRestartAt: 0 };
+    this.restartCounts.set(appName, { count: 0, lastRestartAt: prev.lastRestartAt || 0 });
     this._saveRestartCounts();
   }
 

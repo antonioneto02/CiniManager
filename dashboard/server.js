@@ -1131,12 +1131,6 @@ async function pm2Do(action, target) {
   return dockerController.doAction(action, target);
 }
 
-// So pra cliques manuais no dashboard (start/restart) -- NAO usar em
-// restarts automaticos internos (auto-deploy poller, reset-restarts,
-// webhooks de auto-restart), que ja tem sua propria validacao e
-// precisam continuar rapidos/locais pra nao formar loop com o
-// checker de "processo desatualizado" (ele so olha a hora que o
-// CONTAINER subiu, que um restart rapido via supervisor nao muda).
 async function pm2DoViaActions(action, target) {
   if (target !== 'all' && ['start', 'restart'].includes(action) && APP_GITHUB_WORKFLOW[target]) {
     const log = (src, txt) => { bufferLog(target, src, txt); console.log(`[deploy:${target}] ${txt}`); };
@@ -1386,21 +1380,31 @@ async function waitOnline(name, maxMs = 25000) {
   return false;
 }
 
-async function httpSmoke(appName, maxMs = 15000) {
+async function httpSmoke(appName, maxMs = 30000) {
   const port = readAppPort(appName);
   if (!port || HTTPS_APPS.has(appName)) return true;
   const http = require('http');
+  const https = require('https');
+  // O dashboard roda em container: "localhost" aqui é o próprio cini-dashboard.
+  // As apps estão na mesma rede (cini-apps-network), então o nome do container
+  // resolve direto; localhost fica só como fallback (dashboard rodando no host).
+  const hosts = [...new Set([dockerController.containerOf.get(appName), 'localhost'].filter(Boolean))];
+  // Nem toda app HTTPS está em HTTPS_APPS (ex.: webhook-whatsapp na 443), então
+  // tenta HTTP e, se não responder, HTTPS (o cert é do domínio, não do host).
+  const probe = (client, host) => new Promise(resolve => {
+    const req = client.get({ host, port, path: '/', timeout: 4000, rejectUnauthorized: false }, res => {
+      res.resume();
+      resolve(res.statusCode < 500);
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+  });
   const deadline = Date.now() + maxMs;
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 2000));
-    const ok = await new Promise(resolve => {
-      const req = http.get({ host: 'localhost', port, path: '/', timeout: 4000 }, res => {
-        resolve(res.statusCode < 500);
-      });
-      req.on('error', () => resolve(false));
-      req.on('timeout', () => { req.destroy(); resolve(false); });
-    });
-    if (ok) return true;
+    for (const host of hosts) {
+      if (await probe(http, host) || await probe(https, host)) return true;
+    }
   }
   return false;
 }
@@ -1460,8 +1464,6 @@ async function stagedTest(appName, cwdWin, log) {
     try { child.kill('SIGTERM'); } catch {}
   }
 }
-
-// safe.directory=* via env evita "dubious ownership" (serviço roda com usuário diferente do dono dos repos)
 {
   const n = parseInt(process.env.GIT_CONFIG_COUNT || '0', 10) || 0;
   process.env[`GIT_CONFIG_KEY_${n}`] = 'safe.directory';
@@ -1486,9 +1488,6 @@ if (!GIT_AUTH_CONFIGURED) {
   console.warn('[git] GITHUB_TOKEN não configurado — polling de updates Git desativado. Adicione GITHUB_TOKEN ao .env para habilitar.');
 }
 
-// Mapa app -> workflow do GitHub Actions que faz build+testes+deploy dela.
-// Start/restart passam a disparar esse workflow em vez de agir direto no
-// Docker, pra rodar a suite de testes/lint/segurança do CI antes de subir.
 const GITHUB_OWNER = 'antonioneto02';
 const APP_GITHUB_WORKFLOW = {
   'contagem-produtos':        { repo: 'ContagemProdutos',        file: 'deploy.yml' },
@@ -1845,7 +1844,7 @@ async function restartAfterCodeUpdate(appName, needsRebuild, log) {
   await pm2Do('restart', appName);
 }
 
-function installDeps(cwd, cwdWin, log) {
+function installDeps(cwd, cwdWin, log, appName) {
   if (fs.existsSync(path.join(cwdWin, 'package.json'))) {
     const hasLockFile = fs.existsSync(path.join(cwdWin, 'package-lock.json'));
     const hasNodeModules = fs.existsSync(path.join(cwdWin, 'node_modules'));
@@ -1876,6 +1875,22 @@ function installDeps(cwd, cwdWin, log) {
     } catch (e) { throw new Error('npm install falhou: ' + e.message.split('\n')[0]); }
   }
   if (fs.existsSync(path.join(cwdWin, 'requirements.txt'))) {
+    // O container do dashboard so tem Node.js, nao Python -- pra apps
+    // Python containerizadas, delega o pip install pro container da
+    // propria app (que tem Python), em vez de rodar aqui dentro.
+    const containerName = appName && dockerController.isManaged(appName)
+      ? (dockerController.containerOf.get(appName) || appName) : null;
+    if (containerName) {
+      log('deploy', `docker exec ${containerName} pip install -r requirements.txt...`);
+      try {
+        const out = execSync(`docker exec ${containerName} pip install -r requirements.txt --prefer-binary`, { encoding: 'utf8', timeout: 300000, windowsHide: true });
+        log('deploy', out.trim().split('\n').slice(-3).join('\n') || 'concluído');
+      } catch (e) {
+        const detail = (e.stderr || e.stdout || e.message || '').toString().split('\n').filter(l => l && !l.startsWith('WARNING')).slice(0, 5).join(' | ');
+        throw new Error('pip install falhou: ' + (detail || e.message.split('\n')[0]));
+      }
+      return;
+    }
     log('deploy', 'pip install -r requirements.txt...');
     try {
       const out = execSync('pip install -r requirements.txt --prefer-binary', { cwd, encoding: 'utf8', timeout: 300000, windowsHide: true });
@@ -1915,7 +1930,7 @@ async function deployApp(appName) {
           unpushedCommits.forEach(c => log('deploy', `   ${c.hash} — ${c.subject}`));
         }
 
-        installDeps(cwd, cwdWin, log);
+        installDeps(cwd, cwdWin, log, appName);
         if (STAGED_DEPLOY_APPS.has(appName)) {
           log('deploy', '🧪 Testando em instância temporária antes de subir produção...');
           const staged = await stagedTest(appName, cwdWin, log);
@@ -2003,7 +2018,7 @@ async function deployApp(appName) {
         const pathFilter = getPathFilter(cwd, gitRoot);
         const needsRebuild = changed && requirementsTxtChanged(gitRoot, pathFilter, commitBefore, commitAfter);
 
-        if (changed) installDeps(cwd, cwdWin, log);
+        if (changed) installDeps(cwd, cwdWin, log, appName);
         let testPassed;
         let online = false;
         if (STAGED_DEPLOY_APPS.has(appName)) {
@@ -2035,7 +2050,7 @@ async function deployApp(appName) {
         if (!testPassed && changed) {
           log('deploy', `❌ Teste falhou — fazendo rollback para ${commitBefore}...`);
           git(`reset --hard ${commitBefore}`, gitRoot);
-          installDeps(cwd, cwdWin, log);
+          installDeps(cwd, cwdWin, log, appName);
           await restartAfterCodeUpdate(appName, needsRebuild, log);
           const backOnline = await waitOnline(appName);
           log('deploy', backOnline
@@ -2085,7 +2100,7 @@ async function deployApp(appName) {
       }
     } else {
       log('deploy', '(sem .git — pulando git)');
-      installDeps(cwd, cwdWin, log);
+      installDeps(cwd, cwdWin, log, appName);
 
       log('deploy', 'restart...');
       await pm2Do('restart', appName);

@@ -426,7 +426,7 @@ function getAppUrl(app) {
   if (!app.port) return null;
   if (app.name === 'cini-dashboard') return '/';
   const proto = HTTPS_APPS.has(app.name) ? 'https' : 'http';
-  if (app.name === 'portal-vagas-rh') return `${proto}://consultas.cini.com.br:${app.port}`;
+  if (app.name === 'portal-vagas-rh') return `${proto}://appserverwin.cini.com.br:${app.port}`;
   return `${proto}://${location.hostname}:${app.port}`;
 }
 
