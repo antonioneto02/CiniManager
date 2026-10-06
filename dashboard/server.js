@@ -2293,13 +2293,18 @@ async function pollGitUpdates() {
   const startedAt = now();
   console.log(`[poll] Verificando atualizações em ${Object.keys(APP_REGISTRY).length} apps...`);
 
-  const fetchedRoots = new Map(); 
+  const fetchedRoots = new Map();
   let consecutiveTimeouts = 0;
+  const statusOf = new Map(pm2List().map(p => [p.name, p.pm2_env?.status]));
   for (const [appName, cwd] of Object.entries(APP_REGISTRY)) {
     if (DEPLOY_EXCLUDE.has(appName)) continue;
     if (deployLock.has(appName)) continue;
     const appCfg = autoPollCfg.apps[appName];
     if (appCfg && appCfg.enabled === false) continue;
+    // Container parado de propósito: o auto-deploy faria pip/npm via docker exec
+    // (falha com "container is not running") e depois reiniciaria a app,
+    // ligando algo que foi desligado. Fica pro próximo poll depois de ligada.
+    if (dockerController.isManaged(appName) && statusOf.get(appName) === 'stopped') continue;
 
     const gitRoot = findGitRoot(cwd);
     if (!gitRoot) continue;
