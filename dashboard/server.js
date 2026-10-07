@@ -2363,7 +2363,7 @@ async function runPollCycle() {
 
   const fetchedRoots = new Map();
   let consecutiveTimeouts = 0;
-  const statusOf = new Map(pm2List().map(p => [p.name, p.pm2_env?.status]));
+  const statusOf = new Map((await pm2List()).map(p => [p.name, p.pm2_env?.status]));
   for (const [appName, cwd] of Object.entries(APP_REGISTRY)) {
     if (DEPLOY_EXCLUDE.has(appName)) continue;
     if (deployLock.has(appName)) continue;
