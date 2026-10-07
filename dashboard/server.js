@@ -921,6 +921,7 @@ function pushHistory() {
 }
 
 function pushErrorHistory() {
+  if (errorSSE.length === 0) return;
   (async () => {
     try {
       const list = await fetchErrorsFromDB();
