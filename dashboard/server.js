@@ -26,6 +26,38 @@ const ALLOWED_USER_BY_ID = {
   '000005': 'nerias',
 };
 
+// Diagnóstico de travamento do event loop ("Failed to fetch" intermitente):
+// quando o processo fica >1,5s sem rodar timers, grava em logs/stalls.log o
+// atraso, a memória, as requisições em andamento e as operações síncronas
+// lentas recentes (git/exec), pra saber o que está bloqueando.
+const STALL_LOG = path.join(__dirname, 'logs', 'stalls.log');
+const inflightReqs = new Map();
+const recentSlowSync = [];
+let reqSeq = 0;
+function noteSlowSync(label, ms) {
+  if (ms < 500) return;
+  recentSlowSync.push(`${new Date().toISOString().slice(11, 19)} ${ms}ms ${label}`);
+  if (recentSlowSync.length > 15) recentSlowSync.shift();
+}
+app.use((req, res, next) => {
+  const id = ++reqSeq;
+  inflightReqs.set(id, { url: `${req.method} ${req.originalUrl.slice(0, 80)}`, t: Date.now() });
+  res.on('close', () => inflightReqs.delete(id));
+  next();
+});
+let lastLoopTick = Date.now();
+setInterval(() => {
+  const nowMs = Date.now();
+  const lag = nowMs - lastLoopTick - 1000;
+  lastLoopTick = nowMs;
+  if (lag < 1500) return;
+  const mem = process.memoryUsage();
+  const reqs = [...inflightReqs.values()].map(r => `${r.url} (${nowMs - r.t}ms)`);
+  const line = `${new Date(nowMs).toISOString()} lag=${lag}ms rss=${Math.round(mem.rss / 1048576)}MB heap=${Math.round(mem.heapUsed / 1048576)}MB` +
+    `\n  reqs: ${reqs.join(' | ') || '-'}\n  sync: ${recentSlowSync.join(' | ') || '-'}\n`;
+  fs.appendFile(STALL_LOG, line, () => {});
+}, 1000).unref();
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
@@ -1629,7 +1661,12 @@ async function triggerGithubActionsRun(appName, log) {
 function git(args, cwd) {
   try {
     const parts = args.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
-    return execFileSync('git', parts, { cwd, encoding: 'utf8', timeout: 15000, stdio: ['ignore','pipe','ignore'], env: GIT_ENV, windowsHide: true }).trim();
+    const t0 = Date.now();
+    try {
+      return execFileSync('git', parts, { cwd, encoding: 'utf8', timeout: 15000, stdio: ['ignore','pipe','ignore'], env: GIT_ENV, windowsHide: true }).trim();
+    } finally {
+      noteSlowSync(`git ${args.slice(0, 50)} @ ${path.basename(cwd)}`, Date.now() - t0);
+    }
   } catch { return null; }
 }
 
@@ -1794,7 +1831,6 @@ try {
 } catch {}
 
 const lastCommitCache = new Map();
-
 async function getLastCommit(appName) {
   const cached = lastCommitCache.get(appName);
   if (cached && Date.now() - cached.ts < 60000) return cached.data;
@@ -1875,9 +1911,6 @@ function installDeps(cwd, cwdWin, log, appName) {
     } catch (e) { throw new Error('npm install falhou: ' + e.message.split('\n')[0]); }
   }
   if (fs.existsSync(path.join(cwdWin, 'requirements.txt'))) {
-    // O container do dashboard so tem Node.js, nao Python -- pra apps
-    // Python containerizadas, delega o pip install pro container da
-    // propria app (que tem Python), em vez de rodar aqui dentro.
     const containerName = appName && dockerController.isManaged(appName)
       ? (dockerController.containerOf.get(appName) || appName) : null;
     if (containerName) {
@@ -2301,9 +2334,6 @@ async function pollGitUpdates() {
     if (deployLock.has(appName)) continue;
     const appCfg = autoPollCfg.apps[appName];
     if (appCfg && appCfg.enabled === false) continue;
-    // Container parado de propósito: o auto-deploy faria pip/npm via docker exec
-    // (falha com "container is not running") e depois reiniciaria a app,
-    // ligando algo que foi desligado. Fica pro próximo poll depois de ligada.
     if (dockerController.isManaged(appName) && statusOf.get(appName) === 'stopped') continue;
 
     const gitRoot = findGitRoot(cwd);
