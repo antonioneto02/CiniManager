@@ -2299,7 +2299,22 @@ setInterval(checkWhatsappStuckQueue, 3 * 60 * 1000);
 setTimeout(checkWhatsappStuckQueue, 60 * 1000);
 
 let pollingRunning = false;
+let pollCycleId    = 0;
+let pollStartedAtMs = 0;
 let lastPollTime   = null;
+// Sem esses limites um await que nunca resolve (deploy, WhatsApp/banco) deixava
+// pollingRunning=true pra sempre e o auto-deploy parava em silencio.
+const POLL_DEPLOY_TIMEOUT_MS = 20 * 60 * 1000;
+const POLL_NOTIFY_TIMEOUT_MS = 60 * 1000;
+const POLL_STALE_MS          = 45 * 60 * 1000;
+
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label}: sem resposta após ${Math.round(ms / 1000)}s`)), ms);
+  });
+  return Promise.race([Promise.resolve(promise), timeout]).finally(() => clearTimeout(timer));
+}
 let cachedGitInfo  = {};
 let pollErrors     = {};
 const pollErrorAt  = {};
@@ -2322,9 +2337,28 @@ async function refreshGitCache() {
 }
 
 async function pollGitUpdates() {
-  if (pollingRunning || !autoPollCfg.enabled) return;
+  if (!autoPollCfg.enabled) return;
+  if (pollingRunning) {
+    if (Date.now() - pollStartedAtMs < POLL_STALE_MS) return;
+    console.error(`[poll] Ciclo anterior preso há mais de ${POLL_STALE_MS / 60000} min — liberando e iniciando um novo.`);
+  }
+  const cycleId = ++pollCycleId;
   pollingRunning = true;
+  pollStartedAtMs = Date.now();
   const startedAt = now();
+  try {
+    await runPollCycle();
+    lastPollTime = startedAt;
+  } catch (e) {
+    console.error('[poll] Ciclo abortado por erro:', e.message);
+  } finally {
+    if (cycleId === pollCycleId) pollingRunning = false;
+  }
+  refreshGitCache().catch(e => console.error('[poll] refreshGitCache falhou:', e.message));
+  console.log(`[poll] Verificação concluída.`);
+}
+
+async function runPollCycle() {
   console.log(`[poll] Verificando atualizações em ${Object.keys(APP_REGISTRY).length} apps...`);
 
   const fetchedRoots = new Map();
@@ -2357,7 +2391,8 @@ async function pollGitUpdates() {
           pollErrorLogAt[errLogKey] = Date.now();
           console.error(`[poll] ${appName}: ${fetchResult.reason}`);
         }
-        await notifyGitPollError(appName, fetchResult.reason);
+        await withTimeout(notifyGitPollError(appName, fetchResult.reason), POLL_NOTIFY_TIMEOUT_MS, 'notifyGitPollError')
+          .catch(e => console.error(`[poll] ${appName}:`, e.message));
         if (fetchResult.reason === 'git fetch timeout' && !fetchedRoots.has(gitRoot + '_counted')) {
           fetchedRoots.set(gitRoot + '_counted', true);
           consecutiveTimeouts++;
@@ -2397,13 +2432,13 @@ async function pollGitUpdates() {
             if (effectiveStart && commitMs > effectiveStart && proc?.pm2_env?.status === 'online') {
               console.log(`[poll] ${appName}: processo desatualizado — commit ${new Date(commitMs).toISOString()} > start ${new Date(effectiveStart).toISOString()}`);
               bufferLog(appName, 'deploy', `🔄 Código atualizado no servidor — processo desatualizado, reiniciando...`);
-              await sendWhatsApp(
+              await withTimeout(sendWhatsApp(
                 `🔄 *Reinício automático* — ${appLabel(appName)}\n📅 ${now()}\n` +
                 `📦 *Branch:* ${branch}\n` +
                 `🔑 *Commit:* \`${localHash.slice(0, 7)}\`\n` +
                 `📝 Código no servidor mais recente que o processo em execução\n⏳ Reiniciando...`
-              );
-              await deployApp(appName);
+              ), POLL_NOTIFY_TIMEOUT_MS, 'sendWhatsApp').catch(e => console.error(`[poll] ${appName}:`, e.message));
+              await withTimeout(deployApp(appName), POLL_DEPLOY_TIMEOUT_MS, `deploy de ${appName}`);
               if (!autoPollCfg.apps[appName]) autoPollCfg.apps[appName] = {};
               autoPollCfg.apps[appName].lastHash = localHash.slice(0, 7);
               saveAutoPoll();
@@ -2438,17 +2473,17 @@ async function pollGitUpdates() {
 
       const detectedSig = `detected:${appName}:${remoteHash}`;
       if (shouldNotifyDeploy(detectedSig, UPDATE_DETECTED_DUP_WINDOW_MS)) {
-        await sendWhatsApp(
+        await withTimeout(sendWhatsApp(
           `🔔 *Atualização detectada*\n📦 ${appLabel(appName)} (${branch})\n` +
           `📊 ${pending.length} commit(s) novo(s)\n` +
           (commitList ? `\n📝 Commits:\n${commitList}\n` : '') +
           `\n⏳ Iniciando auto-deploy...`
-        );
+        ), POLL_NOTIFY_TIMEOUT_MS, 'sendWhatsApp').catch(e => console.error(`[poll] ${appName}:`, e.message));
       } else {
         console.log(`[poll] ${appName}: "atualização detectada" suprimida (já notificada p/ ${remoteHash} na última 1h) — tentando auto-deploy de novo`);
       }
 
-      await deployApp(appName);
+      await withTimeout(deployApp(appName), POLL_DEPLOY_TIMEOUT_MS, `deploy de ${appName}`);
       if (!autoPollCfg.apps[appName]) autoPollCfg.apps[appName] = {};
       autoPollCfg.apps[appName].lastHash = await gitAsync('rev-parse --short HEAD', gitRoot);
       saveAutoPoll();
@@ -2457,14 +2492,10 @@ async function pollGitUpdates() {
       pollErrors[appName] = e.message;
       pollErrorAt[appName] = Date.now();
       console.error(`[poll] Erro ao verificar ${appName}:`, e.message);
-      await notifyGitPollError(appName, e.message);
+      await withTimeout(notifyGitPollError(appName, e.message), POLL_NOTIFY_TIMEOUT_MS, 'notifyGitPollError')
+        .catch(err => console.error(`[poll] ${appName}:`, err.message));
     }
   }
-
-  lastPollTime = startedAt;
-  pollingRunning = false;
-  refreshGitCache();
-  console.log(`[poll] Verificação concluída.`);
 }
 
 let pollTimer = null;
@@ -2480,10 +2511,16 @@ function stopPolling() {
 }
 
 setTimeout(async () => {
-  const fixed = await fixRemoteUrls();
-  if (fixed.length) console.log(`[auth] URLs corrigidas: ${fixed.length} repos`);
-  await refreshGitCache();
-  console.log(`[poll] Cache git carregado: ${Object.keys(cachedGitInfo).length} apps`);
+  // Falha aqui nao pode impedir o polling de ligar (antes o auto-deploy
+  // ficava desligado ate o proximo restart do dashboard).
+  try {
+    const fixed = await fixRemoteUrls();
+    if (fixed.length) console.log(`[auth] URLs corrigidas: ${fixed.length} repos`);
+  } catch (e) { console.error('[auth] fixRemoteUrls falhou:', e.message); }
+  try {
+    await refreshGitCache();
+    console.log(`[poll] Cache git carregado: ${Object.keys(cachedGitInfo).length} apps`);
+  } catch (e) { console.error('[poll] refreshGitCache falhou:', e.message); }
   if (autoPollCfg.enabled) {
     startPolling();
     pollGitUpdates(); 
