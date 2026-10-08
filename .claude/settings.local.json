@@ -41,7 +41,14 @@
       "Bash(grep -rn \"GOOGLE_CHAT_WEBHOOK_URL\" \"C:/Projetos/CiniManager\" \"C:/Projetos/Central-Notificacoes\" --include=*.js --include=*.py 2>/dev/null)",
       "Read(//c/Projetos/Central-Notificacoes/**)",
       "Bash(which python python3 2>&1 *)",
-      "PowerShell(docker kill whatsapp-bot 2>&1)"
+      "PowerShell(docker kill whatsapp-bot 2>&1)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(node --check log-watcher.js)",
+      "Bash(node --check dashboard/server.js)",
+      "Bash(git add *)",
+      "Bash(git commit -q -m 'chore: remove comentarios e ajusta formatacao \\(dashboard, log-watcher, ecosystem\\) *)",
+      "Bash(git push *)"
     ],
     "additionalDirectories": [
       "E:\\Projetos\\Central-Notificacoes\\whatsapp-bot",
