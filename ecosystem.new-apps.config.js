@@ -157,7 +157,7 @@ module.exports = {
       merge_logs: true,
       env: { NODE_ENV: 'production', PORT: 3000 },
     },
-    // ── Aplicações incorporadas ao ecossistema ──────────────────────────────
+    
     {
       name: 'api-sicredi',
       script: 'src/app.js',

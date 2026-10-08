@@ -21,8 +21,8 @@ const DB = {
 };
 
 const IGNORE_APPS = new Set(['log-watcher', 'cini-dashboard']);
-const processStatus = new Map(); // appName -> 'online' | 'down'
-const dieTimestamps = new Map(); // appName -> [epochMs, ...] (janela de 1h p/ detectar loop de crash)
+const processStatus = new Map(); 
+const dieTimestamps = new Map(); 
 const CRASH_LOOP_WINDOW_MS = 60 * 60 * 1000;
 const CRASH_LOOP_THRESHOLD = 3;
 

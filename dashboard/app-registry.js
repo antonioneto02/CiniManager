@@ -31,7 +31,7 @@
   'portal-acoes':         'C:/Projetos/PortalAcoes',
   'planner-cini':         'C:/Projetos/PlannerCini',
   'portal-resultados':    'C:/Projetos/PortalResultados',
-  'kanban-entregas':      'C:/Projetos/KanbanEntregas',
+    'kanban-entregas':      'C:/Projetos/KanbanEntregas',
   'gestao-importacao-pedidos': 'C:/Projetos/GestaoImportacaoPedidos',
   'portal-televendas':    'C:/Projetos/PortalTelevendas',
   'protheus-auth':        'C:/Projetos/ProtheusAuth',

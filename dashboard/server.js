@@ -26,10 +26,6 @@ const ALLOWED_USER_BY_ID = {
   '000005': 'nerias',
 };
 
-// Diagnóstico de travamento do event loop ("Failed to fetch" intermitente):
-// quando o processo fica >1,5s sem rodar timers, grava em logs/stalls.log o
-// atraso, a memória, as requisições em andamento e as operações síncronas
-// lentas recentes (git/exec), pra saber o que está bloqueando.
 const STALL_LOG = path.join(__dirname, 'logs', 'stalls.log');
 const inflightReqs = new Map();
 const recentSlowSync = [];
@@ -1418,12 +1414,7 @@ async function httpSmoke(appName, maxMs = 30000) {
   if (!port || HTTPS_APPS.has(appName)) return true;
   const http = require('http');
   const https = require('https');
-  // O dashboard roda em container: "localhost" aqui é o próprio cini-dashboard.
-  // As apps estão na mesma rede (cini-apps-network), então o nome do container
-  // resolve direto; localhost fica só como fallback (dashboard rodando no host).
   const hosts = [...new Set([dockerController.containerOf.get(appName), 'localhost'].filter(Boolean))];
-  // Nem toda app HTTPS está em HTTPS_APPS (ex.: webhook-whatsapp na 443), então
-  // tenta HTTP e, se não responder, HTTPS (o cert é do domínio, não do host).
   const probe = (client, host) => new Promise(resolve => {
     const req = client.get({ host, port, path: '/', timeout: 4000, rejectUnauthorized: false }, res => {
       res.resume();
@@ -2250,7 +2241,7 @@ async function checkWhatsappStuckQueue() {
     if (totalTravadas < WHATSAPP_STUCK_COUNT_THRESHOLD) return;
 
     const info = await pm2Info(APP_ALVO);
-    if (!info || info.status !== 'online') return; // já parado/crashado: autorestart do PM2 cuida disso
+    if (!info || info.status !== 'online') return; 
 
     const lastRestart = whatsappStuckRestartThrottle.get(APP_ALVO) || 0;
     if (Date.now() - lastRestart < WHATSAPP_STUCK_COOLDOWN_MS) {
@@ -2302,8 +2293,7 @@ let pollingRunning = false;
 let pollCycleId    = 0;
 let pollStartedAtMs = 0;
 let lastPollTime   = null;
-// Sem esses limites um await que nunca resolve (deploy, WhatsApp/banco) deixava
-// pollingRunning=true pra sempre e o auto-deploy parava em silencio.
+
 const POLL_DEPLOY_TIMEOUT_MS = 20 * 60 * 1000;
 const POLL_NOTIFY_TIMEOUT_MS = 60 * 1000;
 const POLL_STALE_MS          = 45 * 60 * 1000;
@@ -2511,8 +2501,6 @@ function stopPolling() {
 }
 
 setTimeout(async () => {
-  // Falha aqui nao pode impedir o polling de ligar (antes o auto-deploy
-  // ficava desligado ate o proximo restart do dashboard).
   try {
     const fixed = await fixRemoteUrls();
     if (fixed.length) console.log(`[auth] URLs corrigidas: ${fixed.length} repos`);
@@ -2535,8 +2523,7 @@ const KNOWN_PORTS = {
   'central-notificacoes':    5000,
   'cini-dashboard':          9999,
   'portal-ete':              3021,
-  'cini-tracking':           3010,
-  'portal-resultados':       3019,
+  'cini-tracking':           3010,  'portal-resultados':       3019,
   'whatsapp-pix-motoristas': 3006,
 };
 
