@@ -1,18 +1,17 @@
+const pm2    = require('pm2');
 const sql    = require('mssql');
 const crypto = require('crypto');
+const os     = require('os');
 const { execSync } = require('child_process');
-const dockerController = require('./dashboard/docker-controller');
-const { APP_REGISTRY, CONTAINER_NAME_OVERRIDES } = require('./dashboard/app-registry');
-
 const DESTINATARIO = '554188529918';
-const DEDUP_WINDOW = 60 * 1000;
-const CPU_LIMIT_PCT  = 85;
-const MEM_LIMIT_MB   = 500;
-const DISK_LIMIT_PCT = 85;
+const DEDUP_WINDOW = 60 * 1000; 
+const CPU_LIMIT_PCT  = 85;   
+const MEM_LIMIT_MB   = 500;  
+const DISK_LIMIT_PCT = 85;   
 const DRIVES_TO_CHECK = ['C:', 'E:'];
 
 const DB = {
-  server:   process.env.DB_SERVER_TRACKING || '177.104.136.230',
+  server:   'localhost',
   database: 'dw',
   user:     'cini.tracking',
   password: 'k00b82f6j9TO6alM',
@@ -20,11 +19,8 @@ const DB = {
   pool:     { max: 3, min: 0, idleTimeoutMillis: 10000 },
 };
 
-const IGNORE_APPS = new Set(['log-watcher', 'cini-dashboard']);
-const processStatus = new Map(); 
-const dieTimestamps = new Map(); 
-const CRASH_LOOP_WINDOW_MS = 60 * 60 * 1000;
-const CRASH_LOOP_THRESHOLD = 3;
+const IGNORE_APPS = new Set(['pm2-logrotate', 'log-watcher', 'cini-dashboard']);
+const processStatus = new Map();
 
 const ERROR_PATTERNS = [
   /\berror\b/i,
@@ -50,7 +46,6 @@ const SAFE_PATTERNS = [
   /message Bad /i,
   /\bHTTP\/\d\.\d"\s+\d{3}/,
   /- ERROR - \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/,
-  /\[supervisor\]/, 
 ];
 
 function isErrorLine(line) {
@@ -84,26 +79,21 @@ async function getPool() {
   return pool;
 }
 
-async function notify(mensagem, tipo = 'texto') {
+async function notify(mensagem) {
   try {
     const p = await getPool();
     await p.request()
-      .input('tipo', sql.NVarChar(30),   tipo)
       .input('dest', sql.NVarChar(50),   DESTINATARIO)
       .input('msg',  sql.NVarChar(4000), mensagem)
       .query(`
         INSERT INTO [dbo].[FATO_FILA_NOTIFICACOES]
           (TIPO_MENSAGEM, DESTINATARIO, MENSAGEM, STATUS, TENTATIVAS, DTINC)
-        VALUES (@tipo, @dest, @msg, 'PENDENTE', 0, GETDATE())
+        VALUES ('texto', @dest, @msg, 'PENDENTE', 0, GETDATE())
       `);
   } catch (err) {
     console.error('[log-watcher] Falha ao notificar:', err.message);
     pool = null;
   }
-}
-
-function notifyProcessEvent(mensagem) {
-  return notify(mensagem, 'google_chat_infra');
 }
 
 function stripAnsi(str) {
@@ -120,77 +110,106 @@ function buildLogMessage(appName, line, source) {
   return `${label} — *${appName}*\n📅 ${ts()}\n\n⚠️ ${clean.substring(0, 900)}`;
 }
 
-dockerController.init({
-  appRegistry: APP_REGISTRY,
-  containerOverrides: CONTAINER_NAME_OVERRIDES,
-  stateDir: __dirname,
-  onLog: (name, source, line) => {
-    if (IGNORE_APPS.has(name) || source !== 'stdout' || !line) return;
-    if (isErrorLine(line)) {
-      console.error(`[log-watcher] ${name}: ${line.substring(0, 200)}`);
-      if (shouldSend(`${name}:${line}`)) notify(buildLogMessage(name, line, source));
-    }
-  },
-});
+let _pm2Connected = null;
+function ensurePm2() {
+  if (_pm2Connected) return _pm2Connected;
+  _pm2Connected = new Promise((resolve, reject) => {
+    pm2.connect(false, (err) => {
+      if (err) { _pm2Connected = null; return reject(err); }
+      resolve();
+    });
+  });
+  return _pm2Connected;
+}
 
-dockerController.onEvent((name, action) => {
-  if (IGNORE_APPS.has(name)) return;
+function startLogBus() {
+  ensurePm2().then(() => {
+    pm2.launchBus((err, bus) => {
+      if (err) { setTimeout(startLogBus, 5000); return; }
 
-  if (action === 'die') {
-    const jaEstaDown = processStatus.get(name) === 'down';
-    if (!jaEstaDown) {
-      console.log(`[log-watcher] Processo caiu (primeira vez): ${name}`);
-      processStatus.set(name, 'down');
-      if (shouldSend(`${name}:down`, 5 * 60 * 1000)) {
-        notifyProcessEvent(`🚨 *Processo caiu!*\n📅 ${ts()}\n\n📱 App: *${name}*`);
-      }
-    } else {
-      console.log(`[log-watcher] Processo ainda caindo: ${name}`);
-    }
+      console.log('[log-watcher] Bus de logs ativo.');
 
-    const list = (dieTimestamps.get(name) || []).filter(t => Date.now() - t < CRASH_LOOP_WINDOW_MS);
-    list.push(Date.now());
-    dieTimestamps.set(name, list);
-    if (list.length >= CRASH_LOOP_THRESHOLD && shouldSend(`${name}:crashloop`, CRASH_LOOP_WINDOW_MS)) {
-      notifyProcessEvent(`🔥 *Loop de crash!*\n📅 ${ts()}\n\n📱 App: *${name}*\n${list.length} quedas na última hora.`);
-    }
-  }
+      bus.on('log:out', (pkt) => {
+        const name = pkt.process?.name;
+        const line = (pkt.data || '').trim();
+        if (!name || !line || IGNORE_APPS.has(name)) return;
+        if (isErrorLine(line)) console.error(`[log-watcher] ${name}: ${line.substring(0, 200)}`);
+      });
 
-  if (action === 'start') {
-    const wasDown = processStatus.get(name) === 'down';
-    if (wasDown) {
-      console.log(`[log-watcher] Processo recuperado: ${name}`);
-      if (shouldSend(`${name}:up`, 5 * 60 * 1000)) {
-        notifyProcessEvent(`✅ *Processo recuperado*\n📅 ${ts()}\n\n📱 App: *${name}*`);
-      }
-    }
-    processStatus.set(name, 'online');
-  }
-});
+      bus.on('process:exception', (pkt) => {
+        const name = pkt.process?.name;
+        if (!name || IGNORE_APPS.has(name)) return;
+        const e    = pkt.data || {};
+        const line = [e.message, e.stack].filter(Boolean).join('\n');
+        console.error(`[log-watcher] exception ${name}: ${line.substring(0, 200)}`);
+      });
+
+      bus.on('process:event', (pkt) => {
+        const name  = pkt.process?.name;
+        const event = pkt.event;
+        if (!name || IGNORE_APPS.has(name)) return;
+        const ts = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+
+        if (event === 'exit' || event === 'stop' || event === 'error') {
+          const restarts = pkt.process?.pm2_env?.restart_time ?? 0;
+          const jaEstaDown = processStatus.get(name) === 'down';
+          if (!jaEstaDown) {
+            console.log(`[log-watcher] Processo caiu (primeira vez): ${name} (${event}) restarts=${restarts}`);
+            processStatus.set(name, 'down');
+          } else {
+            console.log(`[log-watcher] Processo ainda caindo (restart ${restarts}): ${name}`);
+          }
+        }
+
+        if (event === 'online') {
+          const wasDown = processStatus.get(name) === 'down';
+          if (wasDown) console.log(`[log-watcher] Processo recuperado: ${name}`);
+          processStatus.set(name, 'online');
+        }
+
+        if (event === 'restart overlimit') {
+          console.log(`[log-watcher] Restart overlimit: ${name}`);
+        }
+      });
+
+      bus.on('error', (err) => {
+        console.error('[log-watcher] Bus error:', err.message);
+        _pm2Connected = null;
+        setTimeout(startLogBus, 5000);
+      });
+    });
+  }).catch(() => setTimeout(startLogBus, 5000));
+}
 
 const resourceAlerts = new Map();
 function checkResources() {
-  for (const proc of dockerController.list()) {
-    const name = proc.name;
-    if (IGNORE_APPS.has(name) || proc.pm2_env.status !== 'online') continue;
+  ensurePm2().then(() => {
+    pm2.list((err, list) => {
+      if (err || !list) return;
 
-    const cpu = proc.monit?.cpu ?? 0;
-    const mem = Math.round((proc.monit?.memory ?? 0) / 1024 / 1024);
+      for (const proc of list) {
+        const name = proc.name;
+        if (IGNORE_APPS.has(name) || proc.pm2_env.status !== 'online') continue;
 
-    const problems = [];
-    if (mem > MEM_LIMIT_MB)  problems.push(`🧠 Memória em *${mem} MB* (limite: ${MEM_LIMIT_MB} MB)`);
+        const cpu = proc.monit?.cpu ?? 0;
+        const mem = Math.round((proc.monit?.memory ?? 0) / 1024 / 1024);
 
-    if (problems.length > 0) {
-      const prev = resourceAlerts.get(name) || 0;
-      resourceAlerts.set(name, prev + 1);
+        const problems = [];
+        if (mem > MEM_LIMIT_MB)  problems.push(`🧠 Memória em *${mem} MB* (limite: ${MEM_LIMIT_MB} MB)`);
 
-      if (prev + 1 >= 2) {
-        console.log(`[log-watcher] Recurso alto: ${name} — ${problems.join(', ')}`);
+        if (problems.length > 0) {
+          const prev = resourceAlerts.get(name) || 0;
+          resourceAlerts.set(name, prev + 1);
+
+          if (prev + 1 >= 2) {
+            console.log(`[log-watcher] Recurso alto: ${name} — ${problems.join(', ')}`);
+          }
+        } else {
+          resourceAlerts.delete(name);
+        }
       }
-    } else {
-      resourceAlerts.delete(name);
-    }
-  }
+    });
+  }).catch(() => {});
 }
 
 function getDiskUsage(drive) {
@@ -227,7 +246,11 @@ function checkDisk() {
   }
 }
 
-setInterval(checkResources, 2  * 60 * 1000);
-setInterval(checkDisk,      10 * 60 * 1000);
+startLogBus();
+setInterval(checkResources, 2  * 60 * 1000); 
+setInterval(checkDisk,      10 * 60 * 1000); 
 setTimeout(checkResources, 30 * 1000);
 setTimeout(checkDisk,      60 * 1000);
+
+process.on('SIGINT',  () => { pm2.disconnect(); process.exit(0); });
+process.on('SIGTERM', () => { pm2.disconnect(); process.exit(0); });

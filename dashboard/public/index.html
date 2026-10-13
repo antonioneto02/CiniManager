@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
+<script src="https://consultas.cini.com.br:3032/protecao.js"></script>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>CINI Manager</title>
@@ -195,9 +196,7 @@ mark.log-hl{background:#d29922;color:#000;border-radius:2px;padding:0 2px;font-s
     </div>
     <div class="subbar-right">
       <button class="btn btn-sm btn-blue" onclick="openAutoPoll()" id="btn-autopoll">🔄 Auto-deploy</button>
-      <button class="btn btn-sm" onclick="openActionsRuns()">⚙️ Actions</button>
       <button class="btn btn-sm btn-yellow" onclick="openRestartResetModal()">🧹 Limpar restarts</button>
-      <button class="btn btn-sm" onclick="ackAllErrors()">✅ Marcar todos como visto</button>
       <button class="btn btn-sm" id="btn-db-target" onclick="openDbTarget()">🗄️ Banco: …</button>
       <button class="btn btn-sm btn-orange" onclick="doDeployAll()">🚀 Deploy All</button>
       <button class="btn btn-sm btn-red" onclick="actionAll('stop')">⏹ Stop All</button>
@@ -282,16 +281,6 @@ mark.log-hl{background:#d29922;color:#000;border-radius:2px;padding:0 2px;font-s
     </div>
     <div class="modal-body" id="autopoll-body"><span class="spin"></span> Carregando...</div>
     <div class="modal-footer" id="autopoll-footer"></div>
-  </div>
-</div>
-
-<div class="modal-bg" id="actions-runs-modal">
-  <div class="modal" style="width:900px;max-width:95vw;max-height:85vh">
-    <div class="modal-head">
-      <span class="modal-head-title">⚙️ Execuções recentes no GitHub Actions</span>
-      <button class="btn btn-sm" onclick="closeActionsRuns()">✕</button>
-    </div>
-    <div class="modal-body" id="actions-runs-body"><span class="spin"></span> Carregando...</div>
   </div>
 </div>
 
@@ -401,7 +390,7 @@ let selectedGroupId = 'all';
 let appFilter = '';
 const DOCS_APPS = new Set([
   'api-weduu','erp-cini','wf-cini','central-tarefas',
-  'hub-cini','cini-pricing','api-sicredi','notificador-pix',
+  'hub-cini','cini-pricing','api-sicredi','api-itau','notificador-pix',
   'whatsapp-bot','webhook-whatsapp','whatsapp-motoristas',
   'whatsapp-webnode','portal-consultas','central-notificacoes',
   'client-baixas-pix','gerenciador-cargas'
@@ -426,7 +415,7 @@ function getAppUrl(app) {
   if (!app.port) return null;
   if (app.name === 'cini-dashboard') return '/';
   const proto = HTTPS_APPS.has(app.name) ? 'https' : 'http';
-  if (app.name === 'portal-vagas-rh') return `${proto}://appserverwin.cini.com.br:${app.port}`;
+  if (app.name === 'portal-vagas-rh') return `${proto}://consultas.cini.com.br:${app.port}`;
   return `${proto}://${location.hostname}:${app.port}`;
 }
 
@@ -441,6 +430,7 @@ const DISPLAY_NAMES = {
   'hub-cini': 'HUB Cini',
   'cini-pricing': 'Pricing Cini',
   'api-sicredi': 'API Sicredi',
+  'api-itau': 'API Itaú (SISPAG)',
   'notificador-pix': 'Notificações PIX',
   'whatsapp-bot': 'BOT WhatsApp',
   'portal-consultas': 'Portal de Consultas',
@@ -468,6 +458,7 @@ const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replac
 const SERVICE_LOG_FILTERS = {
   'client-baixas-pix':   [{l:'Erro',t:'error'},{l:'TXID',t:'txid'},{l:'Baixa',t:'baixa'},{l:'PIX',t:'pix'},{l:'Webhook',t:'webhook'},{l:'Timeout',t:'timeout'},{l:'SQL',t:'sql'}],
   'notificador-pix':     [{l:'Erro',t:'error'},{l:'TXID',t:'txid'},{l:'PIX',t:'pix'},{l:'Enviado',t:'enviado'},{l:'Falha',t:'falha'},{l:'Timeout',t:'timeout'}],
+  'api-itau':            [{l:'Erro',t:'error'},{l:'Transferência',t:'transferencia'},{l:'Pagamentos',t:'pagamentos'},{l:'Token',t:'auth'},{l:'Segurança',t:'segurança'},{l:'HTTP 4xx',t:'http 4'},{l:'Timeout',t:'timeout'}],
   'api-sicredi':         [{l:'Erro',t:'error'},{l:'PIX',t:'pix'},{l:'Boleto',t:'boleto'},{l:'Cobrança',t:'cobranc'},{l:'Token',t:'token'},{l:'Timeout',t:'timeout'},{l:'Webhook',t:'webhook'}],
   'erp-cini':            [{l:'Erro',t:'error'},{l:'Entrada',t:'entrada'},{l:'Saída',t:'saida'},{l:'Usuário',t:'usuario'},{l:'SQL',t:'sql'},{l:'Acesso negado',t:'acesso negado'}],
   'portal-consultas':    [{l:'Erro',t:'error'},{l:'SQL',t:'sql'},{l:'Request',t:'request'},{l:'Auth',t:'auth'},{l:'Timeout',t:'timeout'},{l:'500',t:' 500'},{l:'404',t:' 404'}],
@@ -735,7 +726,6 @@ function renderGrid() {
       <div class="card-header">
         ${dotEl}
         <span class="card-name">${esc(displayName(a.name))}</span>
-        ${a.isDocker ? '<span title="Roda em container Docker" style="opacity:.8">🐳</span>' : ''}
         <span class="drag-handle" title="Arraste para mover">⋮⋮</span>
         ${errorBadge}
         <span class="card-pid">${a.status==='online' ? (a.port ? `:${a.port}` : `pid:${a.pid}`) : a.status}</span>
@@ -1059,7 +1049,7 @@ function renderDbTarget(data) {
       <td style="padding:6px;text-align:center">
         <span class="badge ${a.target === 'remote' ? 'badge-blue' : 'badge-muted'}" style="font-size:10px">${a.target === 'remote' ? 'REMOTO' : 'LOCAL'}</span>
       </td>
-      <td style="padding:6px;color:var(--muted);font-size:11px">${esc(a.notes || (a.usesP11Prod ? 'usa p2510/p2510' : ''))}</td>
+      <td style="padding:6px;color:var(--muted);font-size:11px">${esc(a.notes || (a.usesP11Prod ? 'usa p11_prod/p2510' : ''))}</td>
     </tr>`)
     .join('');
 
@@ -1094,7 +1084,7 @@ function renderDbTarget(data) {
 }
 
 async function doDbTargetSwitch(target) {
-  const label = target === 'remote' ? 'REMOTO (177.104.136.230, p2510)' : 'LOCAL (localhost, p2510)';
+  const label = target === 'remote' ? 'REMOTO (177.104.136.230, p2510)' : 'LOCAL (localhost, p11_prod)';
   if (!confirm(`Tem certeza que quer trocar TODAS as aplicações prontas para ${label}?\n\nIsso vai reiniciar essas aplicações via PM2.`)) {
     return;
   }
@@ -1103,6 +1093,13 @@ async function doDbTargetSwitch(target) {
   try {
     const result = await api('POST', '/api/db-target/switch', { target });
     toast(`Banco alterado para ${target === 'remote' ? 'REMOTO' : 'LOCAL'} com sucesso`);
+    if (result && result.selfRestart) {
+      document.getElementById('db-target-body').innerHTML = '<span class="spin"></span> Reiniciando o próprio CINI Manager para aplicar o novo banco...';
+      await new Promise(r => setTimeout(r, 6000));
+      for (let i = 0; i < 30; i++) {
+        try { await api('GET', '/api/db-target'); break; } catch (e) { await new Promise(r => setTimeout(r, 2000)); }
+      }
+    }
     await refreshDbTargetBadge();
     const data = await api('GET', '/api/db-target');
     renderDbTarget(data);
@@ -1807,57 +1804,6 @@ function closeAutoPoll() {
   stopAutoPollRefresh();
 }
 document.getElementById('autopoll-modal').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeAutoPoll(); });
-
-let actionsRunsRefreshTimer = null;
-const RUN_STATUS_ICON = { queued: '⏳', in_progress: '🔵', completed: '' };
-const RUN_CONCLUSION_ICON = { success: '✅', failure: '🔴', cancelled: '⚪', skipped: '⚪', timed_out: '🔴' };
-
-function renderActionsRuns(runs) {
-  const el = document.getElementById('actions-runs-body');
-  if (!runs.length) { el.innerHTML = '<div class="empty">Nenhuma execução recente.</div>'; return; }
-  el.innerHTML = `<table class="log-table" style="width:100%">
-    <thead><tr><th>App</th><th>Status</th><th>Branch</th><th>Disparado por</th><th>Quando</th><th></th></tr></thead>
-    <tbody>${runs.map(r => {
-      const icon = r.status === 'completed' ? (RUN_CONCLUSION_ICON[r.conclusion] || '⚪') : (RUN_STATUS_ICON[r.status] || '⏳');
-      const label = r.status === 'completed' ? (r.conclusion || 'completed') : r.status;
-      return `<tr>
-        <td>${esc(displayName(r.app || r.repo))}</td>
-        <td>${icon} ${esc(label)}</td>
-        <td>${esc(r.branch || '')}</td>
-        <td>${esc(r.actor || '')}</td>
-        <td>${esc(r.createdAgo || '')}</td>
-        <td><a href="${esc(r.url)}" target="_blank" rel="noopener">Ver ↗</a></td>
-      </tr>`;
-    }).join('')}</tbody>
-  </table>`;
-}
-
-async function openActionsRuns() {
-  document.getElementById('actions-runs-body').innerHTML = '<span class="spin"></span> Carregando...';
-  document.getElementById('actions-runs-modal').classList.add('open');
-  try {
-    const runs = await api('GET', '/api/actions/runs');
-    renderActionsRuns(runs);
-    startActionsRunsRefresh();
-  } catch (e) {
-    document.getElementById('actions-runs-body').innerHTML = `<span style="color:var(--red)">Erro: ${esc(e.message)}</span>`;
-  }
-}
-
-function startActionsRunsRefresh() {
-  if (actionsRunsRefreshTimer) return;
-  actionsRunsRefreshTimer = setInterval(async () => {
-    const modal = document.getElementById('actions-runs-modal');
-    if (!modal.classList.contains('open')) { clearInterval(actionsRunsRefreshTimer); actionsRunsRefreshTimer = null; return; }
-    try { renderActionsRuns(await api('GET', '/api/actions/runs')); } catch {}
-  }, 8000);
-}
-
-function closeActionsRuns() {
-  document.getElementById('actions-runs-modal').classList.remove('open');
-  if (actionsRunsRefreshTimer) { clearInterval(actionsRunsRefreshTimer); actionsRunsRefreshTimer = null; }
-}
-document.getElementById('actions-runs-modal').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeActionsRuns(); });
 function renderDeployHistory(hist) {
   const el = document.getElementById('history');
   if (!hist.length) { el.innerHTML='<div class="empty">Nenhum deploy ainda.</div>'; return; }
@@ -1981,17 +1927,6 @@ async function markErrorAsSeen() {
 async function quickAckError(name) {
   try { applyAckLocally(name); } catch(e) { console.error('[ack] applyAckLocally:', e); }
   try { await api('POST', `/api/apps/${encodeURIComponent(name)}/ack-errors`); } catch(e) { console.error('[ack] endpoint:', e); }
-  loadApps();
-}
-
-async function ackAllErrors() {
-  if (!confirm('Marcar TODOS os erros de TODAS as apps como vistos?')) return;
-  try {
-    const r = await api('POST', '/api/apps/ack-errors-all');
-    toast(`${r.total - r.failed}/${r.total} apps marcadas como vistas`);
-  } catch (e) {
-    toast(`Erro: ${e.message}`);
-  }
   loadApps();
 }
 

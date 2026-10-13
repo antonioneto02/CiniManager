@@ -1,18 +1,35 @@
+// Aplica a flag central de banco de dados (db-target.json) nas aplicações
+// do CiniManager: troca o host de "localhost" <-> "177.104.136.230" e o
+// nome do banco "p11_prod" <-> "p2510" nos .env de cada app registrada
+// como "safe" em scripts/db-apps-registry.js, e opcionalmente reinicia via PM2.
+//
+// Uso:
+//   node scripts/apply-db-target.js --target=remote --apps=webhook-whatsapp        (dry-run, só mostra o diff)
+//   node scripts/apply-db-target.js --target=remote --apps=webhook-whatsapp --apply --restart
+//   node scripts/apply-db-target.js --target=local  --apply --restart              (todas as apps "safe")
+//
+// Por padrão roda em modo dry-run (não escreve nada). Passe --apply para
+// gravar os .env de fato, e --restart para reiniciar os processos PM2
+// afetados depois de gravar. Sem --apps, afeta todas as apps com status
+// "safe" no registro.
+
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 const registry = require('./db-apps-registry');
+
 const STATE_PATH = path.join(__dirname, '..', 'db-target.json');
 const BACKUP_ROOT = path.join(__dirname, '..', 'backups', 'db-target');
 
 function parseArgs() {
-  const args = { apply: false, restart: false, apps: null, target: null };
+  const args = { apply: false, restart: false, apps: null, target: null, defer: [] };
   for (const raw of process.argv.slice(2)) {
     const [key, value] = raw.replace(/^--/, '').split('=');
     if (key === 'apply') args.apply = true;
     else if (key === 'restart') args.restart = true;
     else if (key === 'target') args.target = value;
     else if (key === 'apps') args.apps = value.split(',').map((s) => s.trim());
+    else if (key === 'defer') args.defer = value.split(',').map((s) => s.trim());
   }
   return args;
 }
@@ -45,10 +62,12 @@ function applyToEnvFile(envPath, env) {
   const eol = raw.includes('\r\n') ? '\r\n' : '\n';
   const lines = raw.split(/\r\n|\n/);
   const changes = [];
+
   const knownHostValues = [env.local.dbHost, env.remote.dbHost];
   const knownDbNameValues = [env.local.p11ProdDb, env.remote.p11ProdDb];
   const targetHost = env.target === 'remote' ? env.remote.dbHost : env.local.dbHost;
   const targetDbName = env.target === 'remote' ? env.remote.p11ProdDb : env.local.p11ProdDb;
+
   const newLines = lines.map((line) => {
     const m = line.match(/^([A-Za-z0-9_]+)=(.*)$/);
     if (!m) return line;
@@ -78,6 +97,17 @@ function main() {
   const args = parseArgs();
   if (!args.target || !['local', 'remote'].includes(args.target)) {
     console.error('Uso: node apply-db-target.js --target=local|remote [--apps=a,b] [--apply] [--restart]');
+    process.exit(1);
+  }
+
+  if (args.apply && !process.env.CINI_DB_SWITCH_TOKEN) {
+    console.error(
+      'Recusado: --apply só é permitido quando este script é chamado pelo\n' +
+      'próprio dashboard do CiniManager (botão "Banco: LOCAL/REMOTO"), que\n' +
+      'passa um token gerado em memória a cada execução dele. Rodar este\n' +
+      'comando direto no terminal (mesmo por engano) não troca nada — a\n' +
+      'troca de servidor/banco só pode ser flagada de dentro do dashboard.'
+    );
     process.exit(1);
   }
 
@@ -117,6 +147,9 @@ function main() {
 
     if (changes.length === 0) {
       console.log(`[${app.name}] sem alterações (já está em "${args.target}").`);
+      if (args.apply && (!state.apps[app.name] || state.apps[app.name].target !== args.target)) {
+        state.apps[app.name] = { target: args.target, updatedAt: new Date().toISOString() };
+      }
       continue;
     }
 
@@ -139,20 +172,34 @@ function main() {
   }
 
   if (args.apply && args.restart && results.length) {
-    console.log('\nRecriando containers Docker com a nova env...');
+    console.log('\nReiniciando processos PM2...');
+    let pm2Status = {};
+    try {
+      const raw = execSync('pm2 jlist', { encoding: 'utf8', maxBuffer: 50 * 1024 * 1024 });
+      JSON.parse(raw.slice(raw.indexOf('['))).forEach((p) => { pm2Status[p.name] = p.pm2_env.status; });
+    } catch (err) {
+      pm2Status = {};
+    }
     for (const app of results) {
-      const appDir = path.dirname(app.envPath);
+      if (args.defer.includes(app.pm2Name)) {
+        console.log(`[${app.pm2Name}] reinício adiado (DEFERRED:${app.pm2Name}).`);
+        continue;
+      }
+      if (pm2Status[app.pm2Name] === 'stopped') {
+        console.log(`[${app.pm2Name}] está parado no PM2 — .env trocado, mas não foi iniciado.`);
+        continue;
+      }
       try {
-        execSync('docker compose up -d', { cwd: appDir, encoding: 'utf8', timeout: 180000 });
-        console.log(`[${app.name}] container recriado.`);
+        execSync(`pm2 restart ${app.pm2Name} --update-env`, { encoding: 'utf8' });
+        console.log(`[${app.pm2Name}] reiniciado.`);
       } catch (err) {
-        console.error(`[${app.name}] FALHA ao recriar container:`, err.message);
+        console.error(`[${app.pm2Name}] FALHA ao reiniciar:`, err.message);
       }
     }
   }
 
   if (!args.apply) {
-    console.log('\nModo dry-run — nenhum arquivo foi alterado. Rode novamente com --apply para gravar (e --restart para recriar os containers Docker).');
+    console.log('\nModo dry-run — nenhum arquivo foi alterado. Rode novamente com --apply para gravar (e --restart para reiniciar via PM2).');
   }
 }
 

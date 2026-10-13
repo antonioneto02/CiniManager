@@ -1,0 +1,29 @@
+services:
+  central-tarefas:
+    build:
+      context: ../Central_Tarefas
+      dockerfile: Dockerfile
+    container_name: central-tarefas
+    restart: unless-stopped
+    ports:
+      - "3011:3011"
+    environment:
+      PORT: 3011
+      DB_USER_CT: central_tarefas
+      DB_PASSWORD_CT: wU6z940spHLV8FHk
+      DB_SERVER_CT: host.docker.internal
+      DB_DATABASE_DW: dw
+      DB_DATABASE_PROTHEUS: p11_prod
+      PROTHEUS_SERVER: 192.168.0.88
+      GESTAO_WEBHOOK_TOKEN: 2aSJkFBkYZt3LS26
+      JWT_SECRET_CT: Cini2024#
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ../Central_Tarefas/logs:/app/logs
+    networks:
+      - cini-net
+
+networks:
+  cini-net:
+    driver: bridge
