@@ -1059,7 +1059,7 @@ function renderDbTarget(data) {
       <td style="padding:6px;text-align:center">
         <span class="badge ${a.target === 'remote' ? 'badge-blue' : 'badge-muted'}" style="font-size:10px">${a.target === 'remote' ? 'REMOTO' : 'LOCAL'}</span>
       </td>
-      <td style="padding:6px;color:var(--muted);font-size:11px">${esc(a.notes || (a.usesP11Prod ? 'usa p11_prod/p2510' : ''))}</td>
+      <td style="padding:6px;color:var(--muted);font-size:11px">${esc(a.notes || (a.usesP11Prod ? 'usa p2510/p2510' : ''))}</td>
     </tr>`)
     .join('');
 
@@ -1094,7 +1094,7 @@ function renderDbTarget(data) {
 }
 
 async function doDbTargetSwitch(target) {
-  const label = target === 'remote' ? 'REMOTO (177.104.136.230, p2510)' : 'LOCAL (localhost, p11_prod)';
+  const label = target === 'remote' ? 'REMOTO (177.104.136.230, p2510)' : 'LOCAL (localhost, p2510)';
   if (!confirm(`Tem certeza que quer trocar TODAS as aplicações prontas para ${label}?\n\nIsso vai reiniciar essas aplicações via PM2.`)) {
     return;
   }

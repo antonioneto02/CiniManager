@@ -53,7 +53,7 @@ CLOSE cur; DEALLOCATE cur;
 GO
 
 
--- ── p2510 (era p11_prod) ─────────────────────────────────────────────────
+-- ── p2510 (era p2510) ─────────────────────────────────────────────────
 -- Usado por: webhook-whatsapp, api-sicredi, KanbanEntregas,
 -- GestaoImportacaoPedidos, portal-consultas, whatsapp-motoristas, portal-api,
 -- api-weduu, cini-pricing, erp-cini, portal-rnc, portal-acoes, notificador-pix,

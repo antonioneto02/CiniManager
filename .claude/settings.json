@@ -26,7 +26,7 @@
       "Bash(node scripts/apply-db-target.js --target=local --apps=webhook-whatsapp --apply --restart)",
       "Bash(node --check models/contabilidadeModel.js)",
       "Bash(grep -n '`' \"C:/Projetos/PortalConsultasCini/models/FinanceiroModel.js\")",
-      "Bash(sed -i -E 's/\\\\[p11_prod\\\\]\\\\.\\\\[dbo\\\\]\\\\./[${PROTHEUS_DB}].[dbo]./g' models/FinanceiroModel.js)",
+      "Bash(sed -i -E 's/\\\\[p2510\\\\]\\\\.\\\\[dbo\\\\]\\\\./[${PROTHEUS_DB}].[dbo]./g' models/FinanceiroModel.js)",
       "Bash(node --check models/FinanceiroModel.js)",
       "Bash(python -m py_compile \"E:/Projetos/Central-Notificacoes/CentralNotificacoes/central_notificacoes.py\")",
       "Bash(python3 -m py_compile \"E:/Projetos/Central-Notificacoes/CentralNotificacoes/central_notificacoes.py\")",

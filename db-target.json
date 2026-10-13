@@ -3,7 +3,7 @@
     "local": {
       "label": "Local (padrão atual)",
       "dbHost": "localhost",
-      "p11ProdDb": "p11_prod"
+      "p11ProdDb": "p2510"
     },
     "remote": {
       "label": "Servidor remoto 177.104.136.230",
