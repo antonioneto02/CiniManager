@@ -1896,7 +1896,7 @@ async function restartAfterCodeUpdate(appName, needsRebuild, log) {
     await dockerController.rebuild(appName, { build: true });
     return;
   }
-  if (dockerController.isManaged(appName) && dockerController.codeInImage(appName)) {
+  if (dockerController.isManaged(appName) && dockerController.codeInImage?.(appName)) {
     log('deploy', '🔧 Código fica dentro da imagem — reconstruindo (docker compose up -d --build)...');
     await dockerController.rebuild(appName, { build: true });
     return;
@@ -1950,7 +1950,7 @@ function installDeps(cwd, cwdWin, log, appName) {
     }
     log('deploy', 'pip install -r requirements.txt...');
     try {
-      const out = execSync(`${pip} install -r requirements.txt --prefer-binary`, { cwd, encoding: 'utf8', timeout: 300000, windowsHide: true });
+      const out = execSync('pip install -r requirements.txt --prefer-binary', { cwd, encoding: 'utf8', timeout: 300000, windowsHide: true });
       log('deploy', out.trim().split('\n').slice(-3).join('\n') || 'concluído');
     } catch (e) {
       const detail = (e.stderr || e.stdout || e.message || '').toString().split('\n').filter(l => l && !l.startsWith('WARNING')).slice(0, 5).join(' | ');
@@ -1967,7 +1967,6 @@ async function deployApp(appName) {
   const cwd    = APP_REGISTRY[appName];
   const cwdWin = cwd.replace(/\//g, path.sep);
   const log    = (src, txt) => { bufferLog(appName, src, txt); console.log(`[deploy:${appName}] ${txt}`); };
-  const python = await resolvePython(appName);
 
   try {
     log('deploy', `━━━ DEPLOY INICIADO — ${now()} ━━━`);
