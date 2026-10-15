@@ -13,124 +13,168 @@
   },
   "apps": {
     "webhook-whatsapp": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.432Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.678Z"
     },
     "whatsapp-bot": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.388Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.660Z"
     },
     "whatsapp-webnode": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.391Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.661Z"
     },
     "portal-streamlit": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.393Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.663Z"
     },
     "gerenciador-cargas": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.395Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.664Z"
     },
     "portal-intranet": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.413Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.667Z"
     },
     "portal-televendas": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.415Z"
-    },
-    "solicitacao-fachada": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.417Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.668Z"
     },
     "portal-ete": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.419Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.672Z"
     },
     "coleta-sac": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.422Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.673Z"
     },
     "lp-negocios": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.424Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.674Z"
     },
     "cini-leads": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.426Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.676Z"
     },
     "central-tarefas": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.429Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.677Z"
     },
     "hub-cini": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.466Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.699Z"
     },
     "api-sicredi": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:38:39.133Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.679Z"
     },
     "kanban-entregas": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.434Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.681Z"
     },
     "gestao-importacao-pedidos": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.437Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.683Z"
     },
     "whatsapp-motoristas": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.443Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.685Z"
     },
     "api-weduu": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.446Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.688Z"
     },
     "cini-pricing": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.448Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.689Z"
     },
     "erp-cini": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.450Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.690Z"
     },
     "portal-rnc": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.451Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.691Z"
     },
     "portal-acoes": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.453Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.692Z"
     },
     "notificador-pix": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.455Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.694Z"
     },
     "central-notificacoes": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.457Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.695Z"
     },
     "portal-vagas-rh": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.459Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.695Z"
     },
     "assistente-ia": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.462Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.696Z"
     },
     "wf-cini": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.464Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.697Z"
     },
     "portal-consultas": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.440Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.684Z"
     },
     "cini-dashboard": {
-      "target": "local",
-      "updatedAt": "2026-09-16T12:42:12.468Z"
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.699Z"
+    },
+    "planner-cini": {
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.693Z"
+    },
+    "controle-formulario-qualidade": {
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.671Z"
+    },
+    "portal-api": {
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.686Z"
+    },
+    "cini-tracking": {
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.700Z"
+    },
+    "portal-resultados": {
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.701Z"
+    },
+    "protheus-auth": {
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.702Z"
+    },
+    "contagem-produtos": {
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.703Z"
+    },
+    "contagem-armazens": {
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.704Z"
+    },
+    "portal-marketing": {
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.705Z"
+    },
+    "formulario-cat": {
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.706Z"
+    },
+    "whatsapp-pix-motoristas": {
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.706Z"
+    },
+    "client-baixas-pix": {
+      "target": "remote",
+      "updatedAt": "2026-10-05T17:32:37.707Z"
     }
   }
 }

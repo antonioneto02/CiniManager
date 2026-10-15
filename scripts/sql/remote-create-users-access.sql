@@ -84,7 +84,7 @@ GO
 
 
 -- ── portal_consultas ─────────────────────────────────────────────────────
--- Usado por: PortalConsultasCini, PortalRNC, PortalAcoes, KanbanEntregas,
+-- Usado por: PortalConsultasCini, PortalRNC, PortalAcoes, PlannerCini, KanbanEntregas,
 -- LP-Negocios, Cini-Leads, SolicitacaoFachada
 USE [portal_consultas];
 GO

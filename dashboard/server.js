@@ -303,7 +303,7 @@ const { APP_REGISTRY, CONTAINER_NAME_OVERRIDES } = require('./app-registry');
 const DEPLOY_EXCLUDE    = new Set(['log-watcher']);
 const STAGED_DEPLOY_APPS = new Set(['cini-dashboard']);
 const NOTIFY_EXCLUDE = new Set(['log-watcher']);
-const HTTPS_APPS = new Set(['whatsapp-webnode', 'whatsapp-motoristas', 'whatsapp-pix-motoristas', 'portal-consultas', 'portal-vagas-rh', 'cini-tracking', 'coleta-sac', 'portal-intranet', 'portal-rnc', 'portal-acoes', 'planner-cini', 'portal-resultados', 'contagem-armazens', 'solicitacao-fachada', 'contagem-produtos', 'erp-cini', 'wf-cini', 'central-tarefas', 'hub-cini', 'cini-pricing', 'notificador-pix', 'whatsapp-bot', 'portal-api', 'portal-ete', 'cini-leads', 'kanban-entregas', 'gestao-importacao-pedidos', 'portal-televendas', 'protheus-auth', 'portal-marketing', 'cini-dashboard']);
+const HTTPS_APPS = new Set(['whatsapp-webnode', 'whatsapp-motoristas', 'whatsapp-pix-motoristas', 'portal-consultas', 'portal-vagas-rh', 'cini-tracking', 'coleta-sac', 'portal-intranet', 'portal-rnc', 'portal-acoes', 'planner-cini', 'portal-resultados', 'contagem-armazens', 'contagem-produtos', 'erp-cini', 'wf-cini', 'central-tarefas', 'hub-cini', 'cini-pricing', 'notificador-pix', 'whatsapp-bot', 'portal-api', 'portal-ete', 'cini-leads', 'kanban-entregas', 'gestao-importacao-pedidos', 'portal-televendas', 'protheus-auth', 'portal-marketing', 'cini-dashboard']);
 const AUTOPOLL_FILE = path.join(__dirname, '.autopoll.json');
 const CARD_ORDER_FILE = path.join(__dirname, '.card-order.json');
 const DISPLAY_NAMES = {
@@ -318,6 +318,7 @@ const DISPLAY_NAMES = {
   'hub-cini': 'HUB Cini',
   'cini-pricing': 'Pricing Cini',
   'api-sicredi': 'API Sicredi',
+  'api-itau': 'API Itaú (SISPAG)',
   'notificador-pix': 'Notificações PIX',
   'whatsapp-bot': 'BOT WhatsApp',
   'portal-consultas': 'Portal de Consultas',
@@ -344,8 +345,8 @@ const DISPLAY_NAMES = {
   'protheus-auth':      'Protheus Auth',
   'portal-marketing':   'Portal do Marketing',
   'contagem-armazens':  'Contagem de Armazéns',
-  'solicitacao-fachada': 'Solicitação de Fachada',
   'assistente-ia':      'Assistente IA',
+  'controle-formulario-qualidade': 'Controle de Formulário Qualidade',
 };
 
 function appLabel(name) {
@@ -1494,6 +1495,16 @@ async function stagedTest(appName, cwdWin, log) {
   process.env.GIT_CONFIG_COUNT = String(n + 1);
 }
 
+Object.assign(process.env, {
+  GIT_CONFIG_COUNT: '3',
+  GIT_CONFIG_KEY_0: 'credential.helper',
+  GIT_CONFIG_VALUE_0: '',
+  GIT_CONFIG_KEY_1: 'credential.helper',
+  GIT_CONFIG_VALUE_1: `!"${process.execPath.split(path.sep).join('/')}" "${path.join(__dirname, 'git-credential-env.js').split(path.sep).join('/')}"`,
+  GIT_CONFIG_KEY_2: 'credential.useHttpPath',
+  GIT_CONFIG_VALUE_2: 'true',
+});
+
 const GIT_ENV = {
   ...process.env,
   GIT_TERMINAL_PROMPT: '0',
@@ -1550,7 +1561,6 @@ const APP_GITHUB_WORKFLOW = {
   'protheus-auth':            { repo: 'ProtheusAuth',            file: 'deploy.yml' },
   'portal-marketing':         { repo: 'CiniBomGourmet',          file: 'deploy.yml' },
   'contagem-armazens':        { repo: 'ContagemArmazens',        file: 'deploy.yml' },
-  'solicitacao-fachada':      { repo: 'SolicitacaoFachada',      file: 'deploy.yml' },
   'assistente-ia':            { repo: 'AssistenteIA',            file: 'deploy.yml' },
   'api-itau':                 { repo: 'API_Itau',                file: 'deploy.yml' },
   'controle-formulario-qualidade': { repo: 'ControleFormularioQualidade', file: 'deploy.yml' },
@@ -1750,7 +1760,7 @@ async function fixRemoteUrls() {
         cwd: gitRoot, encoding: 'utf8', timeout: 5000, windowsHide: true,
       });
       results.push({ app: appName, owner });
-      console.log(`[auth] ${appName}: remote → ${token ? 'PAT' : owner}@github.com`);
+      console.log(`[auth] ${appName}: credenciais removidas da URL do remote`);
     } catch {}
   }
   return results;
@@ -1917,7 +1927,7 @@ function installDeps(cwd, cwdWin, log, appName) {
     }
     log('deploy', 'pip install -r requirements.txt...');
     try {
-      const out = execSync('pip install -r requirements.txt --prefer-binary', { cwd, encoding: 'utf8', timeout: 300000, windowsHide: true });
+      const out = execSync(`${pip} install -r requirements.txt --prefer-binary`, { cwd, encoding: 'utf8', timeout: 300000, windowsHide: true });
       log('deploy', out.trim().split('\n').slice(-3).join('\n') || 'concluído');
     } catch (e) {
       const detail = (e.stderr || e.stdout || e.message || '').toString().split('\n').filter(l => l && !l.startsWith('WARNING')).slice(0, 5).join(' | ');
@@ -1934,6 +1944,7 @@ async function deployApp(appName) {
   const cwd    = APP_REGISTRY[appName];
   const cwdWin = cwd.replace(/\//g, path.sep);
   const log    = (src, txt) => { bufferLog(appName, src, txt); console.log(`[deploy:${appName}] ${txt}`); };
+  const python = await resolvePython(appName);
 
   try {
     log('deploy', `━━━ DEPLOY INICIADO — ${now()} ━━━`);
@@ -1960,7 +1971,7 @@ async function deployApp(appName) {
           const staged = await stagedTest(appName, cwdWin, log);
           if (!staged) throw new Error('❌ Teste em porta temporária falhou. Alterações NÃO foram commitadas nem publicadas.');
           log('deploy', '✅ Teste OK — commitando antes de reiniciar...');
-          if (localChanges.length > 0) {
+          if (getLocalChanges(gitRoot).length > 0) {
             log('deploy', 'git add .');
             const addOut = git('add .', gitRoot);
             if (addOut === null) throw new Error('git add falhou');
@@ -1992,7 +2003,7 @@ async function deployApp(appName) {
           const httpOk = await httpSmoke(appName);
           if (!httpOk) throw new Error('❌ Smoke test falhou — app está online no PM2 mas não responde via HTTP. Alterações NÃO foram commitadas.');
           log('deploy', '✅ Teste OK — app rodando e respondendo corretamente');
-          if (localChanges.length > 0) {
+          if (getLocalChanges(gitRoot).length > 0) {
             log('deploy', 'git add .');
             const addOut = git('add .', gitRoot);
             if (addOut === null) throw new Error('git add falhou');
@@ -2556,6 +2567,7 @@ function readAppPort(appName) {
 }
 
 const CINI_ROOT = path.join(__dirname, '..');
+const DB_SWITCH_TOKEN = crypto.randomBytes(32).toString('hex');
 const DB_TARGET_PATH = path.join(CINI_ROOT, 'db-target.json');
 const DB_APPS_REGISTRY_PATH = path.join(CINI_ROOT, 'scripts', 'db-apps-registry.js');
 
@@ -2596,19 +2608,28 @@ app.post('/api/db-target/switch', (req, res) => {
     return res.status(400).json({ error: 'target deve ser "local" ou "remote"' });
   }
   const who = (req.session && (req.session.displayName || req.session.username)) || '?';
-  const args = ['scripts/apply-db-target.js', `--target=${target}`, '--apply', '--restart'];
+  const selfPm2Name = 'cini-dashboard';
+  const args = ['scripts/apply-db-target.js', `--target=${target}`, '--apply', '--restart', `--defer=${selfPm2Name}`];
   execFile('node', args, {
     cwd: CINI_ROOT,
     timeout: 180000,
     windowsHide: true,
     maxBuffer: 10 * 1024 * 1024,
+    env: { ...process.env, CINI_DB_SWITCH_TOKEN: DB_SWITCH_TOKEN },
   }, (err, stdout, stderr) => {
     if (err) {
       addDeployHistory({ time: now(), app: 'db-target', status: 'error', detail: `Falha ao trocar flag de banco para "${target}" (${who}): ${stderr || err.message}` });
       return res.status(500).json({ error: stderr || err.message, output: stdout });
     }
     addDeployHistory({ time: now(), app: 'db-target', status: 'ok', detail: `Flag de banco alterada para "${target}" por ${who}` });
-    res.json({ ok: true, output: stdout });
+    const selfRestart = stdout.includes(`DEFERRED:${selfPm2Name}`);
+    res.json({ ok: true, output: stdout, selfRestart });
+    if (selfRestart) {
+      const pm2Path = require.resolve('pm2');
+      const restartCode = `const pm2=require(${JSON.stringify(pm2Path)});setTimeout(()=>{pm2.connect(e=>{if(!e)pm2.restart(${JSON.stringify(selfPm2Name)},{updateEnv:true},()=>pm2.disconnect());});},1500);`;
+      const { spawn: spawnRestart } = require('child_process');
+      spawnRestart(process.execPath, ['-e', restartCode], { detached: true, stdio: 'ignore', cwd: __dirname }).unref();
+    }
   });
 });
 

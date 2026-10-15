@@ -6,13 +6,14 @@ const STATE_PATH = path.join(__dirname, '..', 'db-target.json');
 const BACKUP_ROOT = path.join(__dirname, '..', 'backups', 'db-target');
 
 function parseArgs() {
-  const args = { apply: false, restart: false, apps: null, target: null };
+  const args = { apply: false, restart: false, apps: null, target: null, defer: [] };
   for (const raw of process.argv.slice(2)) {
     const [key, value] = raw.replace(/^--/, '').split('=');
     if (key === 'apply') args.apply = true;
     else if (key === 'restart') args.restart = true;
     else if (key === 'target') args.target = value;
     else if (key === 'apps') args.apps = value.split(',').map((s) => s.trim());
+    else if (key === 'defer') args.defer = value.split(',').map((s) => s.trim());
   }
   return args;
 }
@@ -81,6 +82,17 @@ function main() {
     process.exit(1);
   }
 
+  if (args.apply && !process.env.CINI_DB_SWITCH_TOKEN) {
+    console.error(
+      'Recusado: --apply só é permitido quando este script é chamado pelo\n' +
+      'próprio dashboard do CiniManager (botão "Banco: LOCAL/REMOTO"), que\n' +
+      'passa um token gerado em memória a cada execução dele. Rodar este\n' +
+      'comando direto no terminal (mesmo por engano) não troca nada — a\n' +
+      'troca de servidor/banco só pode ser flagada de dentro do dashboard.'
+    );
+    process.exit(1);
+  }
+
   const state = loadState();
   const envDef = { local: state.environments.local, remote: state.environments.remote, target: args.target };
 
@@ -117,6 +129,9 @@ function main() {
 
     if (changes.length === 0) {
       console.log(`[${app.name}] sem alterações (já está em "${args.target}").`);
+      if (args.apply && (!state.apps[app.name] || state.apps[app.name].target !== args.target)) {
+        state.apps[app.name] = { target: args.target, updatedAt: new Date().toISOString() };
+      }
       continue;
     }
 

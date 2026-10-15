@@ -37,7 +37,6 @@
   'protheus-auth':        'C:/Projetos/ProtheusAuth',
   'portal-marketing':     'C:/Projetos/PortalMarketing',
   'contagem-armazens':    'C:/Projetos/ContagemArmazens',
-  'solicitacao-fachada':  'C:/Projetos/SolicitacaoFachada',
   'assistente-ia':        'C:/Projetos/AssistenteIA',
   'api-itau':             'C:/Projetos/API_Itau',
   'controle-formulario-qualidade': 'C:/Projetos/ControleFormularioQualidade',

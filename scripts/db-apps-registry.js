@@ -5,7 +5,6 @@ module.exports = [
   { name: 'gerenciador-cargas', pm2Name: 'gerenciador-cargas', envPath: 'C:/Projetos/gerenciador-cargas/.env', status: 'safe', usesP11Prod: false },
   { name: 'portal-intranet', pm2Name: 'portal-intranet', envPath: 'C:/Projetos/PortalIntranetCini/.env', status: 'safe', usesP11Prod: false },
   { name: 'portal-televendas', pm2Name: 'portal-televendas', envPath: 'C:/Projetos/PortalTelevendas/.env', status: 'safe', usesP11Prod: false },
-  { name: 'solicitacao-fachada', pm2Name: 'solicitacao-fachada', envPath: 'C:/Projetos/SolicitacaoFachada/.env', status: 'safe', usesP11Prod: false },
   { name: 'portal-ete', pm2Name: 'portal-ete', envPath: 'C:/Projetos/portalETE/.env', status: 'safe', usesP11Prod: false },
   { name: 'coleta-sac', pm2Name: 'coleta-sac', envPath: 'C:/Projetos/coleta-SAC/.env', status: 'safe', usesP11Prod: false, notes: 'Tem também banco MySQL (Azure) separado, não afetado por esta flag.' },
   { name: 'lp-negocios', pm2Name: 'lp-negocios', envPath: 'C:/Projetos/LP-Negocios/.env', status: 'safe', usesP11Prod: false },
