@@ -1,7 +1,7 @@
 'use strict';
 require('dotenv').config();
 const express       = require('express');
-const dockerController = require('./docker-controller');
+const dockerController = process.env.CINI_RUNTIME === 'pm2' ? require('./pm2-controller') : require('./docker-controller');
 const path          = require('path');
 const fs            = require('fs');
 const https         = require('https');
@@ -1912,7 +1912,7 @@ function installDeps(cwd, cwdWin, log, appName) {
     } catch (e) { throw new Error('npm install falhou: ' + e.message.split('\n')[0]); }
   }
   if (fs.existsSync(path.join(cwdWin, 'requirements.txt'))) {
-    const containerName = appName && dockerController.isManaged(appName)
+    const containerName = appName && dockerController.runtime !== 'pm2' && dockerController.isManaged(appName)
       ? (dockerController.containerOf.get(appName) || appName) : null;
     if (containerName) {
       log('deploy', `docker exec ${containerName} pip install -r requirements.txt...`);
@@ -2689,7 +2689,7 @@ app.get('/api/apps', async (req, res) => {
         pid:        p.pid,
         port:       readAppPort(p.name),
         hasGit:     !!APP_REGISTRY[p.name] && !!findGitRoot(APP_REGISTRY[p.name]),
-        isDocker:   dockerController.isManaged(p.name),
+        isDocker:   dockerController.runtime !== 'pm2' && dockerController.isManaged(p.name),
         deploying:  deployLock.has(p.name),
         lastCommit: commits[i] || null,
         hasAttention: !!attentionReason,
