@@ -8,7 +8,18 @@ const https         = require('https');
 const axios         = require('axios');
 const session       = require('express-session');
 const cookieParser  = require('cookie-parser');
-const { execSync, execFileSync, execFile } = require('child_process');
+const { execSync, execFileSync, execFile, exec } = require('child_process');
+
+// exec assincrono: npm ci/pip install com execSync travavam o dashboard inteiro
+// (event loop parado por 1-2 min, poll e telas congelados) a cada deploy.
+function execAsync(cmd, opts) {
+  return new Promise((resolve, reject) => {
+    exec(cmd, { maxBuffer: 16 * 1024 * 1024, ...opts }, (err, stdout, stderr) => {
+      if (err) return reject(Object.assign(err, { stdout, stderr }));
+      resolve(stdout);
+    });
+  });
+}
 const crypto        = require('crypto');
 const sql           = require('mssql');
 const app  = express();
@@ -355,10 +366,18 @@ function appLabel(name) {
 
 function loadAutoPoll() {
   try {
-    if (fs.existsSync(AUTOPOLL_FILE))
-      return JSON.parse(fs.readFileSync(AUTOPOLL_FILE, 'utf8'));
+    if (fs.existsSync(AUTOPOLL_FILE)) {
+      const cfg = JSON.parse(fs.readFileSync(AUTOPOLL_FILE, 'utf8'));
+      // migracao unica: o padrao antigo era 2 min; o ciclo agora e paralelo e leve, entao 1 min
+      if (!cfg.intervalMigratedV2) {
+        if (!cfg.intervalMin || cfg.intervalMin === 2) cfg.intervalMin = 1;
+        cfg.intervalMigratedV2 = true;
+      }
+      if (!cfg.apps) cfg.apps = {};
+      return cfg;
+    }
   } catch {}
-  return { enabled: true, intervalMin: 2, apps: {} };
+  return { enabled: true, intervalMin: 1, apps: {} };
 }
 
 function loadCardOrder() {
@@ -1870,7 +1889,9 @@ function pushWithRebase(gitRoot, log) {
   const errMsg = e => (e.stderr || e.message || '').toString().trim().split('\n').slice(0, 3).join(' | ');
   log('deploy', 'git pull --rebase --autostash...');
   try {
-    execSync('git pull --rebase --autostash', { cwd: gitRoot, encoding: 'utf8', timeout: 60000 });
+    // o rebase reescreve commits: precisa de identidade (o container nao tem user.name/email)
+    execSync('git -c user.name="CINI Manager" -c user.email="deploy@cini.com.br" pull --rebase --autostash',
+      { cwd: gitRoot, encoding: 'utf8', timeout: 60000 });
   } catch (e) {
     try { execSync('git rebase --abort', { cwd: gitRoot, encoding: 'utf8', timeout: 15000 }); } catch {}
     throw new Error('git pull --rebase falhou (conflito com o GitHub, resolver manualmente): ' + errMsg(e));
@@ -1890,6 +1911,20 @@ function requirementsTxtChanged(gitRoot, pathFilter, before, after) {
   return raw.split('\n').some(l => path.basename(l.trim()) === 'requirements.txt');
 }
 
+// npm ci apaga e reinstala o node_modules inteiro (1-2 min): so vale a pena quando
+// as dependencias mudaram ou o node_modules nao existe.
+const DEP_FILES = new Set(['package.json', 'package-lock.json', 'requirements.txt']);
+function depsChanged(cwdWin, changedFiles) {
+  if (fs.existsSync(path.join(cwdWin, 'package.json')) && !fs.existsSync(path.join(cwdWin, 'node_modules'))) return true;
+  return changedFiles.some(f => DEP_FILES.has(path.basename(String(f).trim())));
+}
+
+function filesBetween(gitRoot, pathFilter, before, after) {
+  const suffix = pathFilter ? ` -- ${pathFilter}` : '';
+  const raw = git(`diff --name-only ${before} ${after}${suffix}`, gitRoot);
+  return raw ? raw.split('\n').filter(Boolean) : [];
+}
+
 async function restartAfterCodeUpdate(appName, needsRebuild, log) {
   if (needsRebuild && dockerController.isManaged(appName)) {
     log('deploy', '🔧 requirements.txt mudou — reconstruindo a imagem (docker compose up -d --build)...');
@@ -1904,14 +1939,14 @@ async function restartAfterCodeUpdate(appName, needsRebuild, log) {
   await pm2Do('restart', appName);
 }
 
-function installDeps(cwd, cwdWin, log, appName) {
+async function installDeps(cwd, cwdWin, log, appName) {
   if (fs.existsSync(path.join(cwdWin, 'package.json'))) {
     const hasLockFile = fs.existsSync(path.join(cwdWin, 'package-lock.json'));
     const hasNodeModules = fs.existsSync(path.join(cwdWin, 'node_modules'));
     if (hasLockFile) {
       log('deploy', 'npm ci --omit=dev...');
       try {
-        const out = execSync('npm ci --omit=dev', { cwd, encoding: 'utf8', timeout: 120000, windowsHide: true });
+        const out = await execAsync('npm ci --omit=dev', { cwd, timeout: 120000, windowsHide: true });
         log('deploy', out.trim() || 'concluído');
         return;
       } catch (e) {
@@ -1930,7 +1965,7 @@ function installDeps(cwd, cwdWin, log, appName) {
     const cmd = 'npm install --omit=dev --no-package-lock';
     log('deploy', cmd + '...');
     try {
-      const out = execSync(cmd, { cwd, encoding: 'utf8', timeout: 180000, windowsHide: true });
+      const out = await execAsync(cmd, { cwd, timeout: 180000, windowsHide: true });
       log('deploy', out.trim() || 'concluído');
     } catch (e) { throw new Error('npm install falhou: ' + e.message.split('\n')[0]); }
   }
@@ -1940,7 +1975,7 @@ function installDeps(cwd, cwdWin, log, appName) {
     if (containerName) {
       log('deploy', `docker exec ${containerName} pip install -r requirements.txt...`);
       try {
-        const out = execSync(`docker exec ${containerName} pip install -r requirements.txt --prefer-binary`, { encoding: 'utf8', timeout: 300000, windowsHide: true });
+        const out = await execAsync(`docker exec ${containerName} pip install -r requirements.txt --prefer-binary`, { encoding: 'utf8', timeout: 300000, windowsHide: true });
         log('deploy', out.trim().split('\n').slice(-3).join('\n') || 'concluído');
       } catch (e) {
         const detail = (e.stderr || e.stdout || e.message || '').toString().split('\n').filter(l => l && !l.startsWith('WARNING')).slice(0, 5).join(' | ');
@@ -1950,7 +1985,7 @@ function installDeps(cwd, cwdWin, log, appName) {
     }
     log('deploy', 'pip install -r requirements.txt...');
     try {
-      const out = execSync('pip install -r requirements.txt --prefer-binary', { cwd, encoding: 'utf8', timeout: 300000, windowsHide: true });
+      const out = await execAsync('pip install -r requirements.txt --prefer-binary', { cwd, timeout: 300000, windowsHide: true });
       log('deploy', out.trim().split('\n').slice(-3).join('\n') || 'concluído');
     } catch (e) {
       const detail = (e.stderr || e.stdout || e.message || '').toString().split('\n').filter(l => l && !l.startsWith('WARNING')).slice(0, 5).join(' | ');
@@ -1987,7 +2022,12 @@ async function deployApp(appName) {
           unpushedCommits.forEach(c => log('deploy', `   ${c.hash} — ${c.subject}`));
         }
 
-        installDeps(cwd, cwdWin, log, appName);
+        const localFiles = [
+          ...localChanges.map(l => l.slice(3)),
+          ...(unpushedCommits.length ? filesBetween(gitRoot, getPathFilter(cwd, gitRoot), '@{u}', 'HEAD') : []),
+        ];
+        if (depsChanged(cwdWin, localFiles)) await installDeps(cwd, cwdWin, log, appName);
+        else log('deploy', 'dependências inalteradas — pulando npm ci/pip install');
         if (STAGED_DEPLOY_APPS.has(appName)) {
           log('deploy', '🧪 Testando em instância temporária antes de subir produção...');
           const staged = await stagedTest(appName, cwdWin, log);
@@ -2067,7 +2107,9 @@ async function deployApp(appName) {
         const pathFilter = getPathFilter(cwd, gitRoot);
         const needsRebuild = changed && requirementsTxtChanged(gitRoot, pathFilter, commitBefore, commitAfter);
 
-        if (changed) installDeps(cwd, cwdWin, log, appName);
+        const depsMudaram = changed && depsChanged(cwdWin, filesBetween(gitRoot, pathFilter, commitBefore, commitAfter));
+        if (depsMudaram) await installDeps(cwd, cwdWin, log, appName);
+        else if (changed) log('deploy', 'dependências inalteradas — pulando npm ci/pip install');
         let testPassed;
         let online = false;
         if (STAGED_DEPLOY_APPS.has(appName)) {
@@ -2099,7 +2141,7 @@ async function deployApp(appName) {
         if (!testPassed && changed) {
           log('deploy', `❌ Teste falhou — fazendo rollback para ${commitBefore}...`);
           git(`reset --hard ${commitBefore}`, gitRoot);
-          installDeps(cwd, cwdWin, log, appName);
+          if (depsMudaram) await installDeps(cwd, cwdWin, log, appName);
           await restartAfterCodeUpdate(appName, needsRebuild, log);
           const backOnline = await waitOnline(appName);
           log('deploy', backOnline
@@ -2149,7 +2191,7 @@ async function deployApp(appName) {
       }
     } else {
       log('deploy', '(sem .git — pulando git)');
-      installDeps(cwd, cwdWin, log, appName);
+      await installDeps(cwd, cwdWin, log, appName);
 
       log('deploy', 'restart...');
       await pm2Do('restart', appName);
@@ -2372,30 +2414,80 @@ async function pollGitUpdates() {
   console.log(`[poll] Verificação concluída.`);
 }
 
+const POLL_FETCH_CONCURRENCY = 8;
+const DEPLOY_RETRY_AFTER_MS  = 30 * 60 * 1000;
+const deployingRoots = new Set();
+const failedDeploys  = new Map();
+
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let i = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (i < items.length) { const k = i++; out[k] = await fn(items[k]); }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
+// Deploy em segundo plano: o ciclo nao espera um deploy (rebuild/npm ci podem levar
+// minutos) pra seguir verificando os outros apps. Um deploy por repo de cada vez,
+// porque apps no mesmo repo (ex.: Central-Notificacoes) dariam git pull concorrente.
+// Deploy que falhou num commit so e tentado de novo com commit novo ou apos 30 min
+// (antes um app quebrado era reimplantado a cada ciclo e segurava a fila inteira).
+function launchDeploy(appName, gitRoot, hash, notifyFn) {
+  if (deployingRoots.has(gitRoot) || deployLock.has(appName)) return;
+  const failed = failedDeploys.get(appName);
+  if (failed && failed.hash === hash && Date.now() - failed.at < DEPLOY_RETRY_AFTER_MS) return;
+  deployingRoots.add(gitRoot);
+  (async () => {
+    try {
+      if (notifyFn) await notifyFn().catch(e => console.error(`[poll] ${appName}:`, e.message));
+      await withTimeout(deployApp(appName), POLL_DEPLOY_TIMEOUT_MS, `deploy de ${appName}`);
+      failedDeploys.delete(appName);
+      if (!autoPollCfg.apps[appName]) autoPollCfg.apps[appName] = {};
+      autoPollCfg.apps[appName].lastHash = await gitAsync('rev-parse --short HEAD', gitRoot);
+      saveAutoPoll();
+    } catch (e) {
+      failedDeploys.set(appName, { hash, at: Date.now() });
+      pollErrors[appName] = e.message;
+      pollErrorAt[appName] = Date.now();
+      console.error(`[poll] Erro no deploy de ${appName} (nova tentativa com commit novo ou em ${DEPLOY_RETRY_AFTER_MS / 60000} min):`, e.message);
+      await withTimeout(notifyGitPollError(appName, e.message), POLL_NOTIFY_TIMEOUT_MS, 'notifyGitPollError')
+        .catch(err => console.error(`[poll] ${appName}:`, err.message));
+    } finally {
+      deployingRoots.delete(gitRoot);
+    }
+  })();
+}
+
 async function runPollCycle() {
   console.log(`[poll] Verificando atualizações em ${Object.keys(APP_REGISTRY).length} apps...`);
+  if (!GIT_AUTH_CONFIGURED) return;
 
-  const fetchedRoots = new Map();
-  let consecutiveTimeouts = 0;
   const statusOf = new Map((await pm2List()).map(p => [p.name, p.pm2_env?.status]));
+  const candidates = [];
   for (const [appName, cwd] of Object.entries(APP_REGISTRY)) {
     if (DEPLOY_EXCLUDE.has(appName)) continue;
     if (deployLock.has(appName)) continue;
     const appCfg = autoPollCfg.apps[appName];
     if (appCfg && appCfg.enabled === false) continue;
     if (dockerController.isManaged(appName) && statusOf.get(appName) === 'stopped') continue;
-
     const gitRoot = findGitRoot(cwd);
     if (!gitRoot) continue;
-    if (!GIT_AUTH_CONFIGURED) continue;
+    candidates.push({ appName, cwd, gitRoot });
+  }
+
+  // todos os git fetch em paralelo (antes era um repo por vez)
+  const roots = [...new Set(candidates.map(c => c.gitRoot))].filter(r => !deployingRoots.has(r));
+  const fetchResults = new Map();
+  await mapLimit(roots, POLL_FETCH_CONCURRENCY, async r => { fetchResults.set(r, await gitFetch(r)); });
+  const timeouts = [...fetchResults.values()].filter(r => !r.ok && r.reason === 'git fetch timeout').length;
+  if (timeouts >= 3) console.error(`[poll] ${timeouts} repos com timeout no fetch — provável problema de rede.`);
+
+  for (const { appName, cwd, gitRoot } of candidates) {
+    const fetchResult = fetchResults.get(gitRoot);
+    if (!fetchResult) continue;
     try {
-      let fetchResult;
-      if (fetchedRoots.has(gitRoot)) {
-        fetchResult = fetchedRoots.get(gitRoot);
-      } else {
-        fetchResult = await gitFetch(gitRoot);
-        fetchedRoots.set(gitRoot, fetchResult);
-      }
       if (!fetchResult.ok) {
         pollErrors[appName] = fetchResult.reason;
         pollErrorAt[appName] = Date.now();
@@ -2405,66 +2497,47 @@ async function runPollCycle() {
           pollErrorLogAt[errLogKey] = Date.now();
           console.error(`[poll] ${appName}: ${fetchResult.reason}`);
         }
-        await withTimeout(notifyGitPollError(appName, fetchResult.reason), POLL_NOTIFY_TIMEOUT_MS, 'notifyGitPollError')
+        withTimeout(notifyGitPollError(appName, fetchResult.reason), POLL_NOTIFY_TIMEOUT_MS, 'notifyGitPollError')
           .catch(e => console.error(`[poll] ${appName}:`, e.message));
-        if (fetchResult.reason === 'git fetch timeout' && !fetchedRoots.has(gitRoot + '_counted')) {
-          fetchedRoots.set(gitRoot + '_counted', true);
-          consecutiveTimeouts++;
-          if (consecutiveTimeouts >= 3) {
-            console.error('[poll] 3+ repos com timeout — provável problema de rede. Abortando ciclo.');
-            break;
-          }
-        }
         continue;
       }
-      consecutiveTimeouts = 0;
-      if (pollErrors[appName]) {
-        const oldKey = `${appName}:${pollErrors[appName]}`;
-        delete pollErrorLogAt[oldKey];
+      if (pollErrors[appName] && !failedDeploys.has(appName)) {
+        delete pollErrorLogAt[`${appName}:${pollErrors[appName]}`];
+        delete pollErrors[appName];
+        delete pollErrorAt[appName];
       }
-      delete pollErrors[appName];
-      delete pollErrorAt[appName];
 
       const branch     = await gitAsync('rev-parse --abbrev-ref HEAD', gitRoot) || 'main';
       const localHash  = await gitAsync('rev-parse HEAD', gitRoot);
       const remoteHash = await gitAsync(`rev-parse origin/${branch}`, gitRoot);
-
-      if (!localHash || !remoteHash || localHash === remoteHash) {
-        if (localHash && remoteHash && localHash === remoteHash) {
-          const relPath = path.relative(
-            gitRoot.replace(/\//g, path.sep),
-            cwd.replace(/\//g, path.sep)
-          ).replace(/\\/g, '/') || '.';
-          const commitTsRaw = await gitAsync(`log -1 --format=%ct -- ${relPath}`, gitRoot);
-          const commitMs = commitTsRaw ? parseInt(commitTsRaw) * 1000 : null;
-          if (commitMs) {
-            const list = await pm2List();
-            const proc = list.find(p => p.name === appName);
-            const pmUptime = proc?.pm2_env?.pm_uptime;
-            const lastInternalRestart = dockerController.restartCounts.get(appName)?.lastRestartAt || 0;
-            const effectiveStart = Math.max(pmUptime || 0, lastInternalRestart);
-            if (effectiveStart && commitMs > effectiveStart && proc?.pm2_env?.status === 'online') {
-              console.log(`[poll] ${appName}: processo desatualizado — commit ${new Date(commitMs).toISOString()} > start ${new Date(effectiveStart).toISOString()}`);
-              bufferLog(appName, 'deploy', `🔄 Código atualizado no servidor — processo desatualizado, reiniciando...`);
-              await withTimeout(sendWhatsApp(
-                `🔄 *Reinício automático* — ${appLabel(appName)}\n📅 ${now()}\n` +
-                `📦 *Branch:* ${branch}\n` +
-                `🔑 *Commit:* \`${localHash.slice(0, 7)}\`\n` +
-                `📝 Código no servidor mais recente que o processo em execução\n⏳ Reiniciando...`
-              ), POLL_NOTIFY_TIMEOUT_MS, 'sendWhatsApp').catch(e => console.error(`[poll] ${appName}:`, e.message));
-              await withTimeout(deployApp(appName), POLL_DEPLOY_TIMEOUT_MS, `deploy de ${appName}`);
-              if (!autoPollCfg.apps[appName]) autoPollCfg.apps[appName] = {};
-              autoPollCfg.apps[appName].lastHash = localHash.slice(0, 7);
-              saveAutoPoll();
-            }
-          }
-        }
-        continue;
-      }
+      if (!localHash || !remoteHash) continue;
       const relPath = path.relative(
         gitRoot.replace(/\//g, path.sep),
         cwd.replace(/\//g, path.sep)
       ).replace(/\\/g, '/') || '.';
+
+      if (localHash === remoteHash) {
+        const commitTsRaw = await gitAsync(`log -1 --format=%ct -- ${relPath}`, gitRoot);
+        const commitMs = commitTsRaw ? parseInt(commitTsRaw) * 1000 : null;
+        if (!commitMs) continue;
+        const proc = (await pm2List()).find(p => p.name === appName);
+        const pmUptime = proc?.pm2_env?.pm_uptime;
+        const lastInternalRestart = dockerController.restartCounts.get(appName)?.lastRestartAt || 0;
+        const effectiveStart = Math.max(pmUptime || 0, lastInternalRestart);
+        if (!(effectiveStart && commitMs > effectiveStart && proc?.pm2_env?.status === 'online')) continue;
+        if (deployingRoots.has(gitRoot)) continue;
+        const failedOutdated = failedDeploys.get(appName);
+        if (failedOutdated && failedOutdated.hash === localHash && Date.now() - failedOutdated.at < DEPLOY_RETRY_AFTER_MS) continue;
+        console.log(`[poll] ${appName}: processo desatualizado — commit ${new Date(commitMs).toISOString()} > start ${new Date(effectiveStart).toISOString()}`);
+        bufferLog(appName, 'deploy', `🔄 Código atualizado no servidor — processo desatualizado, reiniciando...`);
+        launchDeploy(appName, gitRoot, localHash, () => withTimeout(sendWhatsApp(
+          `🔄 *Reinício automático* — ${appLabel(appName)}\n📅 ${now()}\n` +
+          `📦 *Branch:* ${branch}\n` +
+          `🔑 *Commit:* \`${localHash.slice(0, 7)}\`\n` +
+          `📝 Código no servidor mais recente que o processo em execução\n⏳ Reiniciando...`
+        ), POLL_NOTIFY_TIMEOUT_MS, 'sendWhatsApp'));
+        continue;
+      }
 
       const pendingRaw = await gitAsync(`log ${localHash}..${remoteHash} --format=%h|||%s|||%an`, gitRoot);
       const pending = pendingRaw ? pendingRaw.split('\n').filter(Boolean).map(l => {
@@ -2478,6 +2551,10 @@ async function runPollCycle() {
         continue;
       }
 
+      const failed = failedDeploys.get(appName);
+      if (failed && failed.hash === remoteHash && Date.now() - failed.at < DEPLOY_RETRY_AFTER_MS) continue;
+      if (deployingRoots.has(gitRoot)) continue;
+
       const commitList = pending.slice(0, 5)
         .map(c => `  • \`${c.hash}\` ${c.subject} (${c.author})`)
         .join('\n');
@@ -2486,27 +2563,20 @@ async function runPollCycle() {
       bufferLog(appName, 'deploy', `🔔 Auto-deploy: ${pending.length} commit(s) novo(s) detectado(s) no remoto`);
 
       const detectedSig = `detected:${appName}:${remoteHash}`;
-      if (shouldNotifyDeploy(detectedSig, UPDATE_DETECTED_DUP_WINDOW_MS)) {
-        await withTimeout(sendWhatsApp(
-          `🔔 *Atualização detectada*\n📦 ${appLabel(appName)} (${branch})\n` +
-          `📊 ${pending.length} commit(s) novo(s)\n` +
-          (commitList ? `\n📝 Commits:\n${commitList}\n` : '') +
-          `\n⏳ Iniciando auto-deploy...`
-        ), POLL_NOTIFY_TIMEOUT_MS, 'sendWhatsApp').catch(e => console.error(`[poll] ${appName}:`, e.message));
-      } else {
-        console.log(`[poll] ${appName}: "atualização detectada" suprimida (já notificada p/ ${remoteHash} na última 1h) — tentando auto-deploy de novo`);
-      }
-
-      await withTimeout(deployApp(appName), POLL_DEPLOY_TIMEOUT_MS, `deploy de ${appName}`);
-      if (!autoPollCfg.apps[appName]) autoPollCfg.apps[appName] = {};
-      autoPollCfg.apps[appName].lastHash = await gitAsync('rev-parse --short HEAD', gitRoot);
-      saveAutoPoll();
-
+      const notify = shouldNotifyDeploy(detectedSig, UPDATE_DETECTED_DUP_WINDOW_MS)
+        ? () => withTimeout(sendWhatsApp(
+            `🔔 *Atualização detectada*\n📦 ${appLabel(appName)} (${branch})\n` +
+            `📊 ${pending.length} commit(s) novo(s)\n` +
+            (commitList ? `\n📝 Commits:\n${commitList}\n` : '') +
+            `\n⏳ Iniciando auto-deploy...`
+          ), POLL_NOTIFY_TIMEOUT_MS, 'sendWhatsApp')
+        : null;
+      launchDeploy(appName, gitRoot, remoteHash, notify);
     } catch (e) {
       pollErrors[appName] = e.message;
       pollErrorAt[appName] = Date.now();
       console.error(`[poll] Erro ao verificar ${appName}:`, e.message);
-      await withTimeout(notifyGitPollError(appName, e.message), POLL_NOTIFY_TIMEOUT_MS, 'notifyGitPollError')
+      withTimeout(notifyGitPollError(appName, e.message), POLL_NOTIFY_TIMEOUT_MS, 'notifyGitPollError')
         .catch(err => console.error(`[poll] ${appName}:`, err.message));
     }
   }
@@ -2515,9 +2585,9 @@ async function runPollCycle() {
 let pollTimer = null;
 function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
-  const ms = (autoPollCfg.intervalMin || 2) * 60 * 1000;
+  const ms = (autoPollCfg.intervalMin || 1) * 60 * 1000;
   pollTimer = setInterval(pollGitUpdates, ms);
-  console.log(`[poll] Polling ativo — verificando a cada ${autoPollCfg.intervalMin || 2} min`);
+  console.log(`[poll] Polling ativo — verificando a cada ${autoPollCfg.intervalMin || 1} min`);
 }
 function stopPolling() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
@@ -3252,7 +3322,7 @@ app.get('/api/autopoll/config', (req, res) => {
   }
   res.json({
     enabled: autoPollCfg.enabled,
-    intervalMin: autoPollCfg.intervalMin || 2,
+    intervalMin: autoPollCfg.intervalMin || 1,
     lastPoll: lastPollTime,
     polling: pollingRunning,
     apps: appStatus,
