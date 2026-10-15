@@ -34,8 +34,9 @@ class DockerController {
     this.appDirs = new Map();      
     this.containerOf = new Map();  
     this.appOfContainer = new Map();
-    this.runtimeOf = new Map();    
-    this.cache = new Map();         
+    this.runtimeOf = new Map();
+    this.codeMounted = new Map();
+    this.cache = new Map();
     this.restartCounts = new Map(); 
     this.logTails = new Map();   
     this.onLog = null;     
@@ -72,6 +73,23 @@ class DockerController {
 
   managedAppNames() {
     return [...this.appDirs.keys()];
+  }
+
+  // Codigo montado = a pasta de trabalho do container fica dentro de um volume
+  // (ex.: ./:C:/app ou C:/Projetos:C:/Projetos). Senao o codigo foi copiado pra
+  // imagem no build e so um restart nao pega o que veio do git pull.
+  _isCodeMounted(insp) {
+    const norm = p => String(p || '').replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+    const workdir = norm(insp?.Config?.WorkingDir);
+    if (!workdir) return true;
+    return (insp.Mounts || []).some(m => {
+      const dest = norm(m.Destination);
+      return dest && (workdir === dest || workdir.startsWith(dest + '\\'));
+    });
+  }
+
+  codeInImage(appName) {
+    return this.codeMounted.get(appName) === false;
   }
 
   _detectRuntime(dirWin) {
@@ -140,6 +158,7 @@ class DockerController {
       const memBytes = stats ? parseMemToken(String(stats.MemUsage || '').split('/')[0]) : 0;
       const startedAt = insp?.State?.StartedAt ? Date.parse(insp.State.StartedAt) : 0;
       const pid = insp?.State?.Pid || 0;
+      if (insp) this.codeMounted.set(appName, this._isCodeMounted(insp));
 
       this.cache.set(appName, {
         pm_id: appName,

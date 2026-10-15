@@ -1864,6 +1864,24 @@ function getUnpushedCommits(cwd) {
   }) : [];
 }
 
+// Se o GitHub recebeu commits enquanto havia alteracao local, o push direto e
+// rejeitado (non-fast-forward) e o repo fica divergente pra sempre. Rebase antes.
+function pushWithRebase(gitRoot, log) {
+  const errMsg = e => (e.stderr || e.message || '').toString().trim().split('\n').slice(0, 3).join(' | ');
+  log('deploy', 'git pull --rebase --autostash...');
+  try {
+    execSync('git pull --rebase --autostash', { cwd: gitRoot, encoding: 'utf8', timeout: 60000 });
+  } catch (e) {
+    try { execSync('git rebase --abort', { cwd: gitRoot, encoding: 'utf8', timeout: 15000 }); } catch {}
+    throw new Error('git pull --rebase falhou (conflito com o GitHub, resolver manualmente): ' + errMsg(e));
+  }
+  log('deploy', 'git push...');
+  try {
+    execSync('git push', { cwd: gitRoot, encoding: 'utf8', timeout: 30000 });
+  } catch (e) { throw new Error('git push falhou: ' + errMsg(e)); }
+  log('deploy', 'Push OK');
+}
+
 function requirementsTxtChanged(gitRoot, pathFilter, before, after) {
   if (!before || !after || before === after) return false;
   const suffix = pathFilter ? ` -- ${pathFilter}` : '';
@@ -1875,6 +1893,11 @@ function requirementsTxtChanged(gitRoot, pathFilter, before, after) {
 async function restartAfterCodeUpdate(appName, needsRebuild, log) {
   if (needsRebuild && dockerController.isManaged(appName)) {
     log('deploy', '🔧 requirements.txt mudou — reconstruindo a imagem (docker compose up -d --build)...');
+    await dockerController.rebuild(appName, { build: true });
+    return;
+  }
+  if (dockerController.isManaged(appName) && dockerController.codeInImage(appName)) {
+    log('deploy', '🔧 Código fica dentro da imagem — reconstruindo (docker compose up -d --build)...');
     await dockerController.rebuild(appName, { build: true });
     return;
   }
@@ -1983,11 +2006,7 @@ async function deployApp(appName) {
             } catch (e) { throw new Error('git commit falhou: ' + (e.stderr || e.message || '').toString().trim().split('\n').slice(0, 3).join(' | ')); }
             log('deploy', 'Commit criado');
           }
-          log('deploy', 'git push...');
-          try {
-            execSync('git push', { cwd: gitRoot, encoding: 'utf8', timeout: 30000 });
-          } catch (e) { throw new Error('git push falhou: ' + (e.stderr || e.message || '').toString().trim().split('\n').slice(0, 3).join(' | ')); }
-          log('deploy', 'Push OK');
+          pushWithRebase(gitRoot, log);
           log('deploy', '🔄 Agendando auto-restart (Serviço do Windows sobe uma nova instância)...');
           const killCode = `setTimeout(()=>{try{process.kill(${process.pid})}catch(e){}},4000);`;
           const { spawn: spawnRestart } = require('child_process');
@@ -2015,11 +2034,7 @@ async function deployApp(appName) {
             } catch (e) { throw new Error('git commit falhou: ' + (e.stderr || e.message || '').toString().trim().split('\n').slice(0, 3).join(' | ')); }
             log('deploy', 'Commit criado');
           }
-          log('deploy', 'git push...');
-          try {
-            execSync('git push', { cwd: gitRoot, encoding: 'utf8', timeout: 30000 });
-          } catch (e) { throw new Error('git push falhou: ' + (e.stderr || e.message || '').toString().trim().split('\n').slice(0, 3).join(' | ')); }
-          log('deploy', 'Push OK');
+          pushWithRebase(gitRoot, log);
         }
 
         const commitAfter = git('rev-parse --short HEAD', gitRoot);
