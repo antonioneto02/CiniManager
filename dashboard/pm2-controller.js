@@ -1,13 +1,26 @@
 'use strict';
-// Controlador para servidores que rodam os apps no PM2 (CINI_RUNTIME=pm2 no .env do dashboard).
-// Mesma interface do docker-controller.js, para o server.js não precisar saber qual dos dois está em uso.
-// Usa o pm2 da linha de comando (o mesmo do daemon), não a API do node_modules, que pode ser de outra versão.
 const path = require('path');
 const fs = require('fs');
 const { execFile, execFileSync, spawn } = require('child_process');
 
 const POLL_INTERVAL_MS = 15000;
 const EXEC_OPTS = { windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeout: 60000 };
+
+// O pm2 da linha de comando grava no app o ambiente de quem o chamou. Sem isto, o PORT, os tokens e as
+// variáveis do PM2 do próprio dashboard vazavam para todos os apps (PORT=3000 → EADDRINUSE em loop).
+const CHAVES_DO_DASHBOARD = (() => {
+  try { return Object.keys(require('dotenv').parse(fs.readFileSync(path.join(__dirname, '.env')))); } catch { return []; }
+})();
+const CHAVES_PROIBIDAS = /^(PORT|DASHBOARD_PORT|HOST|CINI_.*|CLAUDE.*|AI_AGENT|GITHUB_TOKEN.*|VSCODE_.*|COPILOT_.*|pm_.*|PM2_USAGE|PM2_JSON_PROCESSING|NODE_APP_INSTANCE|unique_id|name|cini-dashboard|exit_code|status|axm_.*|instance_var|watch|autorestart|exec_.*|treekill|vizion|km_link|restart_time|created_at|version|unstable_restarts|username|windowsHide|kill_retry_time|automation|pmx|filter_env|merge_logs|namespace|env)$/;
+
+function envLimpo() {
+  const env = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (CHAVES_PROIBIDAS.test(k) || CHAVES_DO_DASHBOARD.includes(k)) continue;
+    env[k] = v;
+  }
+  return env;
+}
 
 function pm2Bin() {
   if (process.env.PM2_BIN && fs.existsSync(process.env.PM2_BIN)) return process.env.PM2_BIN;
@@ -37,7 +50,7 @@ class Pm2Controller {
 
   _pm2(args, opts = {}) {
     return new Promise((resolve, reject) => {
-      execFile(process.execPath, [this.bin, ...args], { ...EXEC_OPTS, ...opts }, (err, stdout, stderr) => {
+      execFile(process.execPath, [this.bin, ...args], { ...EXEC_OPTS, env: envLimpo(), ...opts }, (err, stdout, stderr) => {
         if (err) return reject(Object.assign(err, { stderr }));
         resolve(stdout);
       });
@@ -152,12 +165,11 @@ class Pm2Controller {
       return this._poll();
     }
     if (!['start', 'stop', 'restart'].includes(action)) throw new Error(`Ação desconhecida: ${action}`);
-    // Reiniciar o próprio dashboard mataria este processo antes do pm2 terminar: dispara desacoplado.
     if (target === 'cini-dashboard' || (target === 'all' && action !== 'start')) {
-      spawn(process.execPath, [this.bin, action, target], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+      spawn(process.execPath, [this.bin, action, target], { detached: true, stdio: 'ignore', windowsHide: true, env: envLimpo() }).unref();
       return;
     }
-    await this._pm2([action, target, ...(action === 'restart' ? ['--update-env'] : [])], { timeout: 120000 });
+    await this._pm2([action, target], { timeout: 120000 });
     await this._poll();
   }
 

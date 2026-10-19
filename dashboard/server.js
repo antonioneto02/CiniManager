@@ -1938,14 +1938,39 @@ async function restartAfterCodeUpdate(appName, needsRebuild, log) {
   await pm2Do('restart', appName);
 }
 
-async function installDeps(cwd, cwdWin, log, appName) {
+// Um install por vez no servidor inteiro: com o auto-deploy em paralelo, varios npm ci ao mesmo
+// tempo estouravam o timeout e deixavam o node_modules pela metade (apps em loop por MODULE_NOT_FOUND).
+let depsQueue = Promise.resolve();
+function installDeps(cwd, cwdWin, log, appName) {
+  const run = depsQueue.then(() => installDepsNow(cwd, cwdWin, log, appName));
+  depsQueue = run.catch(() => {});
+  return run;
+}
+
+const NPM_TIMEOUT_MS = 300000;
+const npmErro = (e) => {
+  const linhas = (e.stderr || e.stdout || '').toString().split('\n').map(l => l.trim()).filter(l => /npm (ERR|error)/i.test(l));
+  return (e.killed ? `timeout de ${NPM_TIMEOUT_MS / 1000}s | ` : '') + (linhas.slice(0, 5).join(' | ') || e.message.split('\n')[0]);
+};
+
+async function installDepsNow(cwd, cwdWin, log, appName) {
   if (fs.existsSync(path.join(cwdWin, 'package.json'))) {
     const hasLockFile = fs.existsSync(path.join(cwdWin, 'package-lock.json'));
     const hasNodeModules = fs.existsSync(path.join(cwdWin, 'node_modules'));
+    // npm ci apaga o node_modules antes de instalar: se falhar no meio, o app fica sem dependencias.
+    // Com node_modules presente usa npm install, que segue o lock sem apagar o que ja esta instalado.
+    if (hasLockFile && hasNodeModules) {
+      log('deploy', 'npm install --omit=dev (segue o package-lock)...');
+      try {
+        const out = await execAsync('npm install --omit=dev --no-audit --no-fund', { cwd, timeout: NPM_TIMEOUT_MS, windowsHide: true });
+        log('deploy', out.trim() || 'concluído');
+        return;
+      } catch (e) { throw new Error('npm install falhou: ' + npmErro(e)); }
+    }
     if (hasLockFile) {
       log('deploy', 'npm ci --omit=dev...');
       try {
-        const out = await execAsync('npm ci --omit=dev', { cwd, timeout: 120000, windowsHide: true });
+        const out = await execAsync('npm ci --omit=dev --no-audit --no-fund', { cwd, timeout: NPM_TIMEOUT_MS, windowsHide: true });
         log('deploy', out.trim() || 'concluído');
         return;
       } catch (e) {
@@ -1953,7 +1978,7 @@ async function installDeps(cwd, cwdWin, log, appName) {
         const isLockMismatch = msg.includes('does not satisfy') || msg.includes('Missing:') || msg.includes('Invalid: lock file')
           || msg.includes('can only install with') || msg.includes('npm-shrinkwrap.json') || /EUSAGE/i.test(msg)
           || !fs.existsSync(path.join(cwdWin, 'package-lock.json'));
-        if (!isLockMismatch) throw new Error('npm install falhou: ' + e.message.split('\n')[0]);
+        if (!isLockMismatch) throw new Error('npm install falhou: ' + npmErro(e));
         if (hasNodeModules) {
           log('deploy', '⚠️  lock file desatualizado mas node_modules presente — pulando reinstalação. Atualize o package-lock.json no repositório.');
           return;
@@ -1964,9 +1989,9 @@ async function installDeps(cwd, cwdWin, log, appName) {
     const cmd = 'npm install --omit=dev --no-package-lock';
     log('deploy', cmd + '...');
     try {
-      const out = await execAsync(cmd, { cwd, timeout: 180000, windowsHide: true });
+      const out = await execAsync(cmd, { cwd, timeout: NPM_TIMEOUT_MS, windowsHide: true });
       log('deploy', out.trim() || 'concluído');
-    } catch (e) { throw new Error('npm install falhou: ' + e.message.split('\n')[0]); }
+    } catch (e) { throw new Error('npm install falhou: ' + npmErro(e)); }
   }
   if (fs.existsSync(path.join(cwdWin, 'requirements.txt'))) {
     const containerName = appName && dockerController.runtime !== 'pm2' && dockerController.isManaged(appName)
