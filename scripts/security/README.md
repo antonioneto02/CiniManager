@@ -18,7 +18,7 @@ Bane no **Windows Firewall do servidor** IPs que atacam as apps expostas ou o RD
 | RDP | senha errada no Windows/RDP (evento 4625) | 5 |
 
 Tempo de ban: 1 dia → 7 dias → 30 dias para reincidentes.
-**Nunca banidos:** redes internas `10.0.0.0/8`, `172.16.0.0/12` (containers) e `192.168.0.0/16` (Protheus `192.168.0.88`), Tailscale `100.64.0.0/10`, IPs públicos da Cini `177.104.136.227`, `200.225.247.91` (consultas/afv) e `200.225.247.159` (protheus.cini.com.br), e a Weduu `35.205.198.169`. A whitelist vale para o servidor inteiro (todas as portas).
+**Nunca banidos:** redes internas `10.0.0.0/8`, `172.16.0.0/12` (containers) e `192.168.0.0/16` (Protheus `192.168.0.88`), Tailscale `100.64.0.0/10`, IPs públicos da Cini `177.104.136.227`, `200.225.247.91` (consultas/afv) e `200.225.247.159` (protheus.cini.com.br), a Weduu `35.205.198.169` e, a pedido, `45.182.132.102`, `201.48.9.65`, `151.245.54.63`, `177.126.4.190`, `177.198.74.248`, `177.104.136.224/29` e `143.137.87.235`. A whitelist vale para o servidor inteiro (todas as portas).
 Tudo isso fica configurado no topo de `configure-ipban.ps1`.
 
 ## Instalação (PowerShell **como Administrador**, nesta ordem)

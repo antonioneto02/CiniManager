@@ -90,7 +90,9 @@ def _falhou_login(status, location):
 
 
 REDES_CINI = ['127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10',
-              '177.104.136.227/32', '200.225.247.91/32', '200.225.247.159/32']
+              '177.104.136.227/32', '200.225.247.91/32', '200.225.247.159/32',
+              '45.182.132.102/32', '201.48.9.65/32', '151.245.54.63/32', '177.126.4.190/32', '177.198.74.248/32',
+              '177.104.136.224/29', '143.137.87.235/32']
 
 
 def ip_da_cini(ip):
@@ -117,7 +119,7 @@ def install_flask(app, app_name, login_paths=(), rate_limit=True, somente_rede_c
             abort(404)
         if somente_rede_cini and not ip_da_cini(request.remote_addr) \
                 and (request.path.rstrip('/') or '/') not in livres:
-            registrar('RATE_LIMIT', request.remote_addr, app_name, path=request.path)
+            # so recusa, nao conta para ban (usuario legitimo fora da lista baniria o IP inteiro)
             abort(403)
 
     @app.after_request
@@ -156,7 +158,7 @@ class DjangoMiddleware:
             registrar('SCANNER', ip, self.app_name, path=request.path)
             return HttpResponseNotFound()
         if self.prefixos_internos and request.path.startswith(self.prefixos_internos) and not ip_da_cini(ip):
-            registrar('RATE_LIMIT', ip, self.app_name, path=request.path)
+            # so recusa, nao conta para ban
             return HttpResponseForbidden()
         resp = self.get_response(request)
         if resp.status_code == 429:
