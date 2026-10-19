@@ -1,5 +1,7 @@
 const sql    = require('mssql');
 const crypto = require('crypto');
+const fs     = require('fs');
+const path   = require('path');
 const { execSync } = require('child_process');
 const dockerController = require('./dashboard/docker-controller');
 const { APP_REGISTRY, CONTAINER_NAME_OVERRIDES } = require('./dashboard/app-registry');
@@ -11,11 +13,21 @@ const MEM_LIMIT_MB   = 500;
 const DISK_LIMIT_PCT = 85;
 const DRIVES_TO_CHECK = ['C:', 'E:'];
 
+// Credenciais do banco no .env do CiniManager (sem dotenv instalado aqui: leitor simples).
+try {
+  for (const linha of fs.readFileSync(path.join(__dirname, '.env'), 'utf8').split(/\r?\n/)) {
+    const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(linha);
+    if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^(['"])(.*)\1$/, '$2');
+  }
+} catch (err) {
+  console.error('[log-watcher] Nao foi possivel ler .env:', err.message);
+}
+
 const DB = {
-  server:   process.env.DB_SERVER_TRACKING || '177.104.136.230',
+  server:   process.env.DB_SERVER_TRACKING,
   database: 'dw',
-  user:     'cini.tracking',
-  password: 'k00b82f6j9TO6alM',
+  user:     process.env.DB_TRACKING_USER,
+  password: process.env.DB_TRACKING_PASSWORD,
   options:  { trustServerCertificate: true, encrypt: false },
   pool:     { max: 3, min: 0, idleTimeoutMillis: 10000 },
 };
@@ -227,7 +239,124 @@ function checkDisk() {
   }
 }
 
+const IPBAN_LOG = process.env.IPBAN_LOG_FILE || 'C:\\Program Files\\IPBan\\logfile.txt';
+const F2B_APPS = require('./scripts/security/fail2ban-apps.json');
+const F2B_MOTIVOS = {
+  'CiniF2B-SCANNER':    'Robô procurando falhas: tentou abrir endereços que só ataques usam (arquivos de senha, WordPress, phpMyAdmin...).',
+  'CiniF2B-RATE_LIMIT': 'Excesso de acessos: estourou o limite de requisições várias vezes (possível flood ou robô).',
+  'CiniF2B-LOGIN_FAIL': 'Tentativa de adivinhar senha: errou o login várias vezes seguidas.',
+  'RDP':                'Tentativa de adivinhar senha do servidor (Área de Trabalho Remota / Windows).',
+};
+let ipbanOffset = null;
+let ipbanResto = '';
+const ipbanFonte = new Map();
+
+// Ataques do IP hoje, lendo os logs de seguranca das apps: { apps: ['portal-ete (3021)'], paths: ['/.env'] }
+function ataquesDoIp(ip) {
+  const dia = new Date().toISOString().substring(0, 10);
+  const apps = new Set();
+  const paths = new Set();
+  for (const app of F2B_APPS) {
+    const dir = path.join(app.dir, 'logs', 'security');
+    let arquivos = [];
+    try { arquivos = fs.readdirSync(dir).filter(n => n.endsWith('.log') && (n.includes(dia) || n.endsWith('-teste.log'))); } catch { continue; }
+    for (const nome of arquivos) {
+      let conteudo = '';
+      try { conteudo = fs.readFileSync(path.join(dir, nome), 'utf8'); } catch { continue; }
+      for (const linha of conteudo.split('\n')) {
+        if (!linha.includes(` ip=${ip} `)) continue;
+        apps.add(`${app.name} (porta ${app.port})`);
+        const p = / path=(\S+)/.exec(linha);
+        if (p && paths.size < 5) paths.add(p[1]);
+      }
+    }
+  }
+  return { apps: [...apps], paths: [...paths] };
+}
+
+// IPBan escreve a duracao como D.HH:MM:SS (ex.: 1.00:00:00 = 1 dia).
+function duracaoLegivel(valor) {
+  const m = /^(?:(\d+)\.)?(\d+):(\d+):(\d+)$/.exec(valor || '');
+  if (!m) return null;
+  const [dias, horas, min] = [+(m[1] || 0), +m[2], +m[3]];
+  const partes = [];
+  if (dias) partes.push(`${dias} ${dias === 1 ? 'dia' : 'dias'}`);
+  if (horas) partes.push(`${horas}h`);
+  if (min) partes.push(`${min}min`);
+  const ate = new Date(Date.now() + ((dias * 24 + horas) * 60 + min) * 60000)
+    .toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short' });
+  return `${partes.join(' ') || 'menos de 1min'} (liberado em ${ate})`;
+}
+
+function processarLinhaIpBan(line) {
+  const falha = /Login fail\w*:?\s*([0-9a-fA-F:.]+),\s*[^,]*,\s*([^,\s]+)/i.exec(line);
+  if (falha) {
+    ipbanFonte.set(falha[1], falha[2]);
+    if (ipbanFonte.size > 2000) ipbanFonte.clear();
+    return null;
+  }
+  if (/un-?banning/i.test(line)) return null;
+  const ban = /Banning ip address:?\s*([0-9a-fA-F:.]+)/i.exec(line);
+  if (!ban) return null;
+  const ip = ban[1];
+  const duracao = /duration:\s*([\d.:]+)/i.exec(line);
+  const count = /count:\s*(\d+)/i.exec(line);
+  const fonte = ipbanFonte.get(ip);
+  const ataques = ataquesDoIp(ip);
+  return {
+    ip,
+    motivo: F2B_MOTIVOS[fonte] || fonte || 'não identificado',
+    apps: ataques.apps,
+    paths: ataques.paths,
+    count: count ? count[1] : null,
+    duracao: duracao ? (duracaoLegivel(duracao[1]) || duracao[1]) : null,
+  };
+}
+
+function checkIpBan() {
+  fs.stat(IPBAN_LOG, (err, st) => {
+    if (err) return;
+    if (ipbanOffset === null) { ipbanOffset = st.size; return; }
+    if (st.size < ipbanOffset) { ipbanOffset = 0; ipbanResto = ''; }
+    if (st.size === ipbanOffset) return;
+
+    const inicio = ipbanOffset;
+    ipbanOffset = st.size;
+    let texto = '';
+    fs.createReadStream(IPBAN_LOG, { start: inicio, end: st.size - 1, encoding: 'utf8' })
+      .on('data', (chunk) => { texto += chunk; })
+      .on('error', (e) => console.error('[log-watcher] Erro lendo log do IPBan:', e.message))
+      .on('end', () => {
+        const linhas = (ipbanResto + texto).split(/\r?\n/);
+        ipbanResto = linhas.pop();
+        const bans = linhas.map(processarLinhaIpBan).filter(Boolean)
+          .filter(b => shouldSend(`ipban:${b.ip}`, 10 * 60 * 1000));
+        if (bans.length === 0) return;
+
+        for (const b of bans) console.log(`[log-watcher] IP banido: ${b.ip} — ${b.motivo} ${b.apps.join(', ')}`);
+
+        if (bans.length > 5) {
+          const lista = bans.slice(0, 20).map(b => `• ${b.ip} — ${b.motivo}`).join('\n');
+          notify(`🛡️ *${bans.length} IPs banidos* pelo IPBan\n📅 ${ts()}\n\n${lista}${bans.length > 20 ? '\n…' : ''}`);
+          return;
+        }
+        for (const b of bans) {
+          notify(`🛡️ *IP bloqueado no servidor* — appserverwin\n📅 ${ts()}\n\n`
+            + `🌐 IP: *${b.ip}*\n`
+            + `⚠️ Motivo: ${b.motivo}\n`
+            + (b.apps.length ? `📱 App atacada: ${b.apps.join(', ')}\n` : '')
+            + (b.paths.length ? `🔎 Tentou acessar: ${b.paths.join(', ')}\n` : '')
+            + (b.count ? `🔁 Tentativas: ${b.count}\n` : '')
+            + (b.duracao ? `⏳ Bloqueado por: ${b.duracao}\n` : '')
+            + `\nEsse IP não acessa nenhuma porta do servidor até ser liberado.`);
+        }
+      });
+  });
+}
+
 setInterval(checkResources, 2  * 60 * 1000);
 setInterval(checkDisk,      10 * 60 * 1000);
+setInterval(checkIpBan,     30 * 1000);
 setTimeout(checkResources, 30 * 1000);
 setTimeout(checkDisk,      60 * 1000);
+checkIpBan();

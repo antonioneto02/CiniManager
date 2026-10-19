@@ -10,8 +10,6 @@ const session       = require('express-session');
 const cookieParser  = require('cookie-parser');
 const { execSync, execFileSync, execFile, exec } = require('child_process');
 
-// exec assincrono: npm ci/pip install com execSync travavam o dashboard inteiro
-// (event loop parado por 1-2 min, poll e telas congelados) a cada deploy.
 function execAsync(cmd, opts) {
   return new Promise((resolve, reject) => {
     exec(cmd, { maxBuffer: 16 * 1024 * 1024, ...opts }, (err, stdout, stderr) => {
@@ -22,8 +20,10 @@ function execAsync(cmd, opts) {
 }
 const crypto        = require('crypto');
 const sql           = require('mssql');
+const f2b = require('../shared/cini-fail2ban');
 const app  = express();
 const PORT = parseInt(process.env.DASHBOARD_PORT) || 9999;
+app.use(f2b.guard('cini-dashboard', { loginPaths: ['/login'] }));
 const PROTHEUS_AUTH_URL = process.env.PROTHEUS_AUTH_URL || 'https://consultas.cini.com.br:3032';
 const GOOGLE_CHAT_STATUS_WEBHOOK_URL = process.env.GOOGLE_CHAT_STATUS_WEBHOOK_URL || '';
 const CERT_DIR = 'C:\\Projetos\\Certificados';
@@ -31,7 +31,7 @@ const sslOptions = {
   key: fs.readFileSync(path.join(CERT_DIR, 'cini.key')),
   cert: fs.readFileSync(path.join(CERT_DIR, 'cini.crt')),
 };
-const SESSION_SECRET = process.env.SESSION_SECRET || 'cini_manager_secret_2026';
+const SESSION_SECRET = process.env.SESSION_SECRET || require('crypto').randomBytes(48).toString('hex');
 const ALLOWED_USER_BY_ID = {
   '000460': 'antonio.neto',
   '000005': 'nerias',
@@ -368,7 +368,6 @@ function loadAutoPoll() {
   try {
     if (fs.existsSync(AUTOPOLL_FILE)) {
       const cfg = JSON.parse(fs.readFileSync(AUTOPOLL_FILE, 'utf8'));
-      // migracao unica: o padrao antigo era 2 min; o ciclo agora e paralelo e leve, entao 1 min
       if (!cfg.intervalMigratedV2) {
         if (!cfg.intervalMin || cfg.intervalMin === 2) cfg.intervalMin = 1;
         cfg.intervalMigratedV2 = true;
@@ -408,7 +407,7 @@ const DB_CFG   = {
   server:   process.env.DB_SERVER_TRACKING || 'localhost',
   database: process.env.DB_DATABASE_DW || 'dw',
   user:     process.env.DB_TRACKING_USER || 'cini.tracking',
-  password: process.env.DB_TRACKING_PASSWORD || 'k00b82f6j9TO6alM',
+  password: process.env.DB_TRACKING_PASSWORD,
   options:  { trustServerCertificate: true, encrypt: false },
   pool:     { max: 3, min: 0, idleTimeoutMillis: 10000 },
 };
@@ -417,7 +416,7 @@ const GROUPS_DB_CFG = {
   server: process.env.DB_SERVER_ERP || 'localhost',
   database: process.env.DB_DATABASE_DW || 'dw',
   user: process.env.DB_USER_ERP || 'gestao.portaria',
-  password: process.env.DB_PASSWORD_ERP || '0wd10ARpf522tQzM',
+  password: process.env.DB_PASSWORD_ERP,
   options: { trustServerCertificate: true, encrypt: false },
   pool: { max: 2, min: 0, idleTimeoutMillis: 10000 },
 };
@@ -3595,8 +3594,12 @@ const MONITOR_RESTART_COOLDOWN_MS = 5 * 60 * 1000;
 
 app.post('/api/webhook/monitor', async (req, res) => {
   const tok = req.headers['x-webhook-secret'] || req.query.token || '';
-  if (WEBHOOK_SECRET && tok !== WEBHOOK_SECRET) {
-    console.warn('[webhook/monitor] token inválido');
+  // Sem .webhook-secret configurado, so aceita chamada da rede da Cini (monitor interno).
+  const autorizado = WEBHOOK_SECRET
+    ? tok === WEBHOOK_SECRET
+    : f2b.ipDaCini(String(req.socket.remoteAddress || '').replace(/^::ffff:/, ''));
+  if (!autorizado) {
+    console.warn('[webhook/monitor] não autorizado');
     return res.status(401).json({ error: 'Não autorizado' });
   }
 

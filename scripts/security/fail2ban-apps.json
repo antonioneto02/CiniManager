@@ -1,0 +1,213 @@
+[
+  {
+    "name": "webhook-whatsapp",
+    "port": 443,
+    "dir": "C:\\Projetos\\WebhookWhatsAppNode"
+  },
+  {
+    "name": "whatsapp-webnode",
+    "port": 444,
+    "dir": "C:\\Projetos\\Central-Notificacoes\\WhatsAppWebNode"
+  },
+  {
+    "name": "api-weduu",
+    "port": 3004,
+    "dir": "C:\\Projetos\\API_Weduu"
+  },
+  {
+    "name": "cini-tracking",
+    "port": 3010,
+    "dir": "C:\\Projetos\\AppTracking"
+  },
+  {
+    "name": "portal-ete",
+    "port": 3021,
+    "dir": "C:\\Projetos\\portalETE"
+  },
+  {
+    "name": "lp-negocios",
+    "port": 3023,
+    "dir": "C:\\Projetos\\LP-Negocios"
+  },
+  {
+    "name": "contagem-produtos",
+    "port": 3028,
+    "dir": "C:\\Projetos\\ContagemProdutos"
+  },
+  {
+    "name": "portal-marketing",
+    "port": 3033,
+    "dir": "C:\\Projetos\\PortalMarketing"
+  },
+  {
+    "name": "contagem-armazens",
+    "port": 3034,
+    "dir": "C:\\Projetos\\ContagemArmazens"
+  },
+  {
+    "name": "cini-dashboard",
+    "port": 9999,
+    "dir": "C:\\Projetos\\CiniManager",
+    "usesSharedSource": true
+  },
+  {
+    "name": "assistente-ia",
+    "port": 3041,
+    "dir": "C:\\Projetos\\AssistenteIA"
+  },
+  {
+    "name": "planner-cini",
+    "port": 3038,
+    "dir": "C:\\Projetos\\PlannerCini"
+  },
+  {
+    "name": "controle-formulario-qualidade",
+    "port": 3037,
+    "dir": "C:\\Projetos\\ControleFormularioQualidade"
+  },
+  {
+    "name": "solicitacao-fachada",
+    "port": 3035,
+    "dir": "C:\\Projetos\\SolicitacaoFachada"
+  },
+  {
+    "name": "protheus-auth",
+    "port": 3032,
+    "dir": "C:\\Projetos\\ProtheusAuth"
+  },
+  {
+    "name": "portal-televendas",
+    "port": 3031,
+    "dir": "C:\\Projetos\\PortalTelevendas"
+  },
+  {
+    "name": "gestao-importacao-pedidos",
+    "port": 3030,
+    "dir": "C:\\Projetos\\GestaoImportacaoPedidos"
+  },
+  {
+    "name": "kanban-entregas",
+    "port": 3029,
+    "dir": "C:\\Projetos\\KanbanEntregas"
+  },
+  {
+    "name": "portal-acoes",
+    "port": 3027,
+    "dir": "C:\\Projetos\\PortalAcoes"
+  },
+  {
+    "name": "portal-rnc",
+    "port": 3026,
+    "dir": "C:\\Projetos\\PortalRNC"
+  },
+  {
+    "name": "portal-intranet",
+    "port": 3025,
+    "dir": "C:\\Projetos\\PortalIntranetCini"
+  },
+  {
+    "name": "cini-leads",
+    "port": 3024,
+    "dir": "C:\\Projetos\\Cini-Leads"
+  },
+  {
+    "name": "coleta-sac",
+    "port": 3022,
+    "dir": "C:\\Projetos\\coleta-SAC"
+  },
+  {
+    "name": "portal-vagas-rh",
+    "port": 3020,
+    "dir": "C:\\Projetos\\PortalVagasRH"
+  },
+  {
+    "name": "portal-api",
+    "port": 3014,
+    "dir": "C:\\Projetos\\portalApi"
+  },
+  {
+    "name": "central-tarefas",
+    "port": 3011,
+    "dir": "C:\\Projetos\\Central_Tarefas"
+  },
+  {
+    "name": "cini-pricing",
+    "port": 3009,
+    "dir": "C:\\Projetos\\Cini-Pricing"
+  },
+  {
+    "name": "wf-cini",
+    "port": 3008,
+    "dir": "C:\\Projetos\\WF_Cini\\wf_cini"
+  },
+  {
+    "name": "hub-cini",
+    "port": 3005,
+    "dir": "C:\\Projetos\\Hub_Cini"
+  },
+  {
+    "name": "erp-cini",
+    "port": 3003,
+    "dir": "C:\\Projetos\\Gestao_Portaria\\erp_cini"
+  },
+  {
+    "name": "portal-consultas",
+    "port": 3000,
+    "dir": "C:\\Projetos\\PortalConsultasCini"
+  },
+  {
+    "name": "portal-resultados",
+    "port": 3019,
+    "dir": "C:\\Projetos\\PortalResultados"
+  },
+  {
+    "name": "api-itau",
+    "port": 3015,
+    "dir": "C:\\Projetos\\API_Itau"
+  },
+  {
+    "name": "api-sicredi",
+    "port": 3012,
+    "dir": "C:\\Projetos\\ApiSicredi"
+  },
+  {
+    "name": "notificador-pix",
+    "port": 3013,
+    "dir": "C:\\Projetos\\Confirmacao_Pix\\NotificadorPIX"
+  },
+  {
+    "name": "whatsapp-pix-motoristas",
+    "port": 3006,
+    "dir": "C:\\Projetos\\Central-Notificacoes\\WhatsAppPixMotoristas"
+  },
+  {
+    "name": "whatsapp-motoristas",
+    "port": 3002,
+    "dir": "C:\\Projetos\\Central-Notificacoes\\WhatsAppMotoristas"
+  },
+  {
+    "name": "whatsapp-bot",
+    "port": 3001,
+    "dir": "C:\\Projetos\\Central-Notificacoes\\whatsapp-bot"
+  },
+  {
+    "name": "portal-streamlit",
+    "port": 8501,
+    "dir": "C:\\Projetos\\PortalConsultasStreamlit"
+  },
+  {
+    "name": "gerenciador-cargas",
+    "port": 8502,
+    "dir": "C:\\Projetos\\gerenciador-cargas"
+  },
+  {
+    "name": "central-notificacoes",
+    "port": 5000,
+    "dir": "C:\\Projetos\\Central-Notificacoes\\CentralNotificacoes"
+  },
+  {
+    "name": "client-baixas-pix",
+    "port": 5001,
+    "dir": "C:\\Projetos\\ClientBaixasPIX"
+  }
+]
