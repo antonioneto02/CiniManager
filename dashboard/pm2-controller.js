@@ -2,12 +2,8 @@
 const path = require('path');
 const fs = require('fs');
 const { execFile, execFileSync, spawn } = require('child_process');
-
 const POLL_INTERVAL_MS = 15000;
 const EXEC_OPTS = { windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeout: 60000 };
-
-// O pm2 da linha de comando grava no app o ambiente de quem o chamou. Sem isto, o PORT, os tokens e as
-// variáveis do PM2 do próprio dashboard vazavam para todos os apps (PORT=3000 → EADDRINUSE em loop).
 const CHAVES_DO_DASHBOARD = (() => {
   try { return Object.keys(require('dotenv').parse(fs.readFileSync(path.join(__dirname, '.env')))); } catch { return []; }
 })();
@@ -39,9 +35,9 @@ class Pm2Controller {
   constructor() {
     this.runtime = 'pm2';
     this.bin = null;
-    this.processos = new Map();     // nome -> item no formato da lista do dashboard
-    this.containerOf = new Map();   // sem containers no PM2; mantido pela interface
-    this.restartCounts = new Map(); // nome -> { count, lastRestartAt }
+    this.processos = new Map();     
+    this.containerOf = new Map();   
+    this.restartCounts = new Map(); 
     this.onLog = null;
     this._onEvent = null;
     this._onCriticalEvent = null;
@@ -61,7 +57,6 @@ class Pm2Controller {
     return JSON.parse(execFileSync(process.execPath, [this.bin, 'jlist'], { ...EXEC_OPTS, encoding: 'utf8' }));
   }
 
-  // As pastas do app-registry são as do servidor Docker (C:/Projetos/...). Aqui valem as que o PM2 usa.
   init({ appRegistry, onLog }) {
     this.onLog = onLog || (() => {});
     this.bin = pm2Bin();
@@ -79,7 +74,6 @@ class Pm2Controller {
     this._pollTimer = setInterval(() => this._poll().catch(() => {}), POLL_INTERVAL_MS);
   }
 
-  // Um único "pm2 logs --json" alimenta o buffer de logs de todos os apps (detecção de erros do dashboard).
   _startLogStream() {
     const proc = spawn(process.execPath, [this.bin, 'logs', '--json', '--lines', '0'], { windowsHide: true });
     let buf = '';
@@ -128,7 +122,6 @@ class Pm2Controller {
         monit: { cpu: p.monit?.cpu || 0, memory: p.monit?.memory || 0 },
       });
 
-      // Mesmos avisos que o docker-controller gera a partir dos eventos do Docker.
       if (anterior) {
         const antes = anterior.pm2_env.status;
         if (antes !== 'online' && status === 'online' && this._onEvent) this._onEvent(p.name, 'start', {});
@@ -173,7 +166,6 @@ class Pm2Controller {
     await this._poll();
   }
 
-  // Sem imagem para reconstruir: no PM2 basta reiniciar.
   async rebuild(appName) {
     return this.doAction('restart', appName);
   }
