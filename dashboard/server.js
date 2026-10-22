@@ -1884,8 +1884,11 @@ function getUnpushedCommits(cwd) {
 
 // Se o GitHub recebeu commits enquanto havia alteracao local, o push direto e
 // rejeitado (non-fast-forward) e o repo fica divergente pra sempre. Rebase antes.
+// Retorna o HEAD antes/depois do rebase: se vieram commits do GitHub, quem chama
+// precisa instalar dependencias e reiniciar o app com o codigo que chegou.
 function pushWithRebase(gitRoot, log) {
   const errMsg = e => (e.stderr || e.message || '').toString().trim().split('\n').slice(0, 3).join(' | ');
+  const before = git('rev-parse HEAD', gitRoot);
   log('deploy', 'git pull --rebase --autostash...');
   try {
     // o rebase reescreve commits: precisa de identidade (o container nao tem user.name/email)
@@ -1900,6 +1903,24 @@ function pushWithRebase(gitRoot, log) {
     execSync('git push', { cwd: gitRoot, encoding: 'utf8', timeout: 30000 });
   } catch (e) { throw new Error('git push falhou: ' + errMsg(e)); }
   log('deploy', 'Push OK');
+  return { before, after: git('rev-parse HEAD', gitRoot) };
+}
+
+// O rebase do pushWithRebase pode trazer commits do GitHub (ex.: package.json novo) que
+// nao passaram pelo installDeps/restart do deploy local -- sem isso o app quebrava no
+// proximo restart com MODULE_NOT_FOUND.
+async function syncAfterRebase(appName, cwd, cwdWin, gitRoot, rebase, log, { restart = true } = {}) {
+  if (!rebase || !rebase.before || !rebase.after || rebase.before === rebase.after) return;
+  const files = filesBetween(gitRoot, getPathFilter(cwd, gitRoot), rebase.before, rebase.after);
+  log('deploy', `⬇️ Rebase trouxe ${files.length} arquivo(s) do GitHub`);
+  if (!files.length) return;
+  if (depsChanged(cwdWin, files)) await installDeps(cwd, cwdWin, log, appName);
+  if (!restart) return;
+  log('deploy', '🔄 Reiniciando com o código vindo do GitHub...');
+  await restartAfterCodeUpdate(appName, files.some(f => path.basename(f.trim()) === 'requirements.txt'), log);
+  const online = await waitOnline(appName);
+  if (!online) throw new Error('❌ App não ficou online após aplicar os commits vindos do GitHub (já publicados) — verificar logs.');
+  log('deploy', '✅ App online com o código vindo do GitHub');
 }
 
 function requirementsTxtChanged(gitRoot, pathFilter, before, after) {
@@ -2069,7 +2090,8 @@ async function deployApp(appName) {
             } catch (e) { throw new Error('git commit falhou: ' + (e.stderr || e.message || '').toString().trim().split('\n').slice(0, 3).join(' | ')); }
             log('deploy', 'Commit criado');
           }
-          pushWithRebase(gitRoot, log);
+          const rebase = pushWithRebase(gitRoot, log);
+          await syncAfterRebase(appName, cwd, cwdWin, gitRoot, rebase, log, { restart: false });
           log('deploy', '🔄 Agendando auto-restart (Serviço do Windows sobe uma nova instância)...');
           const killCode = `setTimeout(()=>{try{process.kill(${process.pid})}catch(e){}},4000);`;
           const { spawn: spawnRestart } = require('child_process');
@@ -2097,7 +2119,8 @@ async function deployApp(appName) {
             } catch (e) { throw new Error('git commit falhou: ' + (e.stderr || e.message || '').toString().trim().split('\n').slice(0, 3).join(' | ')); }
             log('deploy', 'Commit criado');
           }
-          pushWithRebase(gitRoot, log);
+          const rebase = pushWithRebase(gitRoot, log);
+          await syncAfterRebase(appName, cwd, cwdWin, gitRoot, rebase, log);
         }
 
         const commitAfter = git('rev-parse --short HEAD', gitRoot);
