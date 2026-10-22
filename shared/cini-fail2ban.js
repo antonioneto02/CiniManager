@@ -14,7 +14,6 @@ const SCANNER_PATTERNS = [
 ];
 
 const DEFAULT_LOGIN_FAIL_REDIRECT = /[?&](error=invalid_credentials|erro=1)(&|$)/i;
-
 const THROTTLE_MS = { SCANNER: 2 * 1000, RATE_LIMIT: 60 * 1000, LOGIN_FAIL: 0 };
 const lastLogged = new Map();
 
@@ -25,7 +24,6 @@ function clientIp(req) {
 
 const REDES_CINI = ['127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10',
   '177.104.136.227/32', '200.225.247.91/32', '200.225.247.159/32',
-  // liberados em 19/10/2026 (mesma lista da Whitelist do IPBan)
   '45.182.132.102/32', '201.48.9.65/32', '151.245.54.63/32', '177.126.4.190/32', '177.198.74.248/32',
   '177.104.136.224/29', '143.137.87.235/32'];
 
@@ -117,8 +115,6 @@ function guard(appName, opts = {}) {
   const janela = new Map();
 
   return function ciniFail2ban(req, res, next) {
-    // Sem NODE_ENV=production o tratador de erro padrao do Express devolve o stack trace (codigo,
-    // caminhos) para quem fez a requisicao. So o modo do Express muda — process.env.NODE_ENV nao.
     if (req.app && req.app.get('env') !== 'production' && !process.env.F2B_MANTER_ENV_EXPRESS) req.app.set('env', 'production');
     if (isScanner(req)) {
       registrar('SCANNER', req, appName);
@@ -176,8 +172,6 @@ function apenasRedeCini(appName, publicas = []) {
     if (ipDaCini(ip)) return next();
     const caminho = (req.path || '/').replace(/\/+$/, '') || '/';
     if (regras.some(r => (!r.metodo || r.metodo === req.method) && r.testa(caminho))) return next();
-    // So recusa, NAO conta para ban: um usuario legitimo fora da lista (ex.: escritorio com IP novo)
-    // abrindo a app 3x baniria o IP inteiro (aconteceu com 45.182.132.102 em 19/10/2026).
     return res.status(403).json({ error: 'Acesso negado' });
   };
 }
